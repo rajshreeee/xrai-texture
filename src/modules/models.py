@@ -8,6 +8,7 @@ def prompt():
     print("3. Exit")
 
     choice = None
+    # choice =2
     while True:
             try:
                 choice = int(input("Select Function (1-3): "))
@@ -17,7 +18,7 @@ def prompt():
                     print("Please choose one of the 3 available functions.")
             except ValueError:
                 print("That's not an integer. Please try again.")
-
+    print("choice")
     return choice
 
 def model_module():
@@ -25,7 +26,8 @@ def model_module():
     
     #get input from user
     choice = prompt()
-    
+    # choice = 1
+
     #perform user requested tasks
     while choice != 3:
         

@@ -165,8 +165,8 @@ def train_hrnet(saved_model_path, dataset, train_images_dir, test_images_dir, ma
 def test_hrnet(result_path, dataset, feature_dataset_choice, test_images_dir, mask_images_dir):
    # List all files in the input directory
    image_files = os.listdir(test_images_dir)
-   config_file = config.saved_models_path + "/HRNET/" + dataset + '/Feature_' + str(feature_dataset_choice)+'/fcn_hr18_4xb2-160k_cityscapes-512x1024.py'
-   checkpoint_file = config.saved_models_path + '/HRNET/' + dataset + '/Feature_' + str(feature_dataset_choice)+'/iter_16000.pth'
+   config_file = config.saved_models_path + "/Hrnet/" + dataset + '/Feature_' + str(feature_dataset_choice)+'/fcn_hr18_4xb2-160k_cityscapes-512x1024.py'
+   checkpoint_file = config.saved_models_path + '/Hrnet/' + dataset + '/Feature_' + str(feature_dataset_choice)+'/iter_16000.pth'
    device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
    model = init_model(config_file, checkpoint_file, device=device)
    total_iou = 0.0

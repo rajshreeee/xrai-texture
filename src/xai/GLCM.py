@@ -136,23 +136,63 @@ def compute_glcm_properties(feature_maps, gray_image):
     return results
 
 def load_fpn(model_path):
-    model = smp.FPN(
-        encoder_name="resnet34",        # Choose encoder, e.g., resnet34, resnet50
-        encoder_weights="imagenet",     # Use pretrained weights from ImageNet
-        in_channels=3,                  # Input channels (RGB images)
-        classes=1                       # Number of output classes
-    )
-    model.load_state_dict(torch.load(model_path))
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    try:
+        model = torch.load(model_path, map_location=device)
+        if isinstance(model, torch.nn.Module):
+            model = model.to(device)
+            print("Model loaded successfully as a full model.")
+        else:
+            raise ValueError("Loaded object is not a model. Trying as state_dict...")
+    except Exception as e:
+        print(f"Failed to load model directly: {e}")
+        
+        model = smp.FPN(
+            encoder_name="resnet34",        # Choose encoder, e.g., resnet34, resnet50
+            encoder_weights="imagenet",     # Use pretrained weights from ImageNet
+            in_channels=3,                  # Input channels (e.g., RGB)
+            classes=1                       # Number of output classes
+        )
+        try:
+            state_dict = torch.load(model_path, map_location=device)
+            model.load_state_dict(state_dict)
+            model = model.to(device)
+            print("Model loaded successfully as state_dict.")
+        except Exception as e:
+            print(f"Failed to load model as state_dict: {e}")
+            raise RuntimeError(f"Failed to load the model from {model_path}. Ensure the file and architecture match.")
+    
     return model
 
 def load_linknet(model_path):
-    model = smp.Linknet(
-        encoder_name="resnet34",        # Choose encoder, e.g., resnet34, resnet50
-        encoder_weights="imagenet",     # Use pretrained weights from ImageNet
-        in_channels=3,                  # Input channels (RGB images)
-        classes=1                       # Number of output classes
-    )
-    model.load_state_dict(torch.load(model_path))
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    try:
+        model = torch.load(model_path, map_location=device)
+        if isinstance(model, torch.nn.Module):
+            model = model.to(device)
+            print("Model loaded successfully as a full model.")
+        else:
+            raise ValueError("Loaded object is not a model. Trying as state_dict...")
+    except Exception as e:
+        print(f"Failed to load model directly: {e}")
+        
+        model = smp.Linknet(
+            encoder_name="resnet34",       # Choose encoder, e.g., resnet34, resnet50
+            encoder_weights="imagenet",    # Use pretrained weights from ImageNet
+            in_channels=3,                 # Input channels (e.g., RGB)
+            classes=1                      # Number of output classes
+        )
+        try:
+            state_dict = torch.load(model_path, map_location=device)
+            model.load_state_dict(state_dict)
+            model = model.to(device)
+            print("Model loaded successfully as state_dict.")
+        except Exception as e:
+            print(f"Failed to load model as state_dict: {e}")
+            raise RuntimeError(f"Failed to load the model from {model_path}. Ensure the file and architecture match.")
+    
     return model
 
 def analyse_GLCM(model_choice, dataset_choice):

@@ -57,6 +57,11 @@ def calculate_pixelaccuracy(preds, labels):
 
 
 def add_to_test_results(file_path, dataset, feature_dataset_choice, value):
+
+    dir_path = os.path.dirname(file_path)
+    if not os.path.exists(dir_path):
+        os.makedirs(dir_path, exist_ok=True)
+        
      # Check if the CSV file exists
     if os.path.isfile(file_path):
         # Read the existing CSV file

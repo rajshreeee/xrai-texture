@@ -27,7 +27,10 @@ def prompt():
 
 def main():
     #Execute the main program
+    print("main")
+
     choice = prompt()
+    # choice=1
 
     while choice != 3:
 

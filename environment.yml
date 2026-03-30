@@ -1,0 +1,17 @@
+name: xai_classification_env
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.8.20
+  - pytorch
+  - torchvision
+  - timm
+  - matplotlib
+  - pandas
+  - numpy
+  - scikit-learn
+  - pillow
+  - opencv
+  - optuna
+  - neptune-client

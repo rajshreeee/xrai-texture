@@ -95,7 +95,33 @@ def test_fpn(result_path, dataset, feature_dataset_choice, data_loader):
         print("The given model does not exist, Train the model before testing.")
         return
 
-    model = torch.load(model_path, map_location=torch.device('cpu'))
+    # Determine the device (GPU or CPU)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # Try to load the model
+    try:
+        # Attempt to load as a full model
+        model = torch.load(model_path, map_location=device)
+        if isinstance(model, torch.nn.Module):
+            model = model.to(device)
+        else:
+            raise ValueError("Loaded object is not a model. Trying as state_dict...")
+    except Exception as e:
+        print(f"Failed to load model directly: {e}")
+        
+        model = smp.FPN(
+            encoder_name="resnet34",        # Ensure this matches the trained model's architecture
+            encoder_weights=None,          # No pretrained weights for testing
+            in_channels=3,                 # Input channels (e.g., RGB)
+            classes=1                      # Number of output classes
+        )
+        try:
+            state_dict = torch.load(model_path, map_location=device)
+            model.load_state_dict(state_dict)
+            model = model.to(device)
+        except Exception as e:
+            print(f"Failed to load model as state_dict: {e}")
+            raise RuntimeError(f"Failed to load the model from {model_path}. Ensure the file and architecture match.")
 
     # Evaluate the model on the test dataset
     model.eval()

@@ -91,6 +91,10 @@ def test_deeplab(result_path, dataset, feature_dataset_choice, data_loader):
         return
 
     model = torch.load(model_path, map_location=torch.device('cpu'))
+    
+    # Move the model to GPU if available
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = model.to(device)
 
     # Evaluate the model on the test dataset
     model.eval()
@@ -109,6 +113,7 @@ def test_deeplab(result_path, dataset, feature_dataset_choice, data_loader):
     average_iou = np.mean(iou_scores)
     print(average_iou)
 
+    #this crashes if directory is not present.
     os.makedirs(config.results_path, exist_ok=True)
     add_to_test_results(result_path, dataset, feature_dataset_choice, average_iou)
 

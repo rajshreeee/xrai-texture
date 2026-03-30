@@ -159,14 +159,17 @@ def train_unet(saved_model_path, dataset, train_images_dir, test_images_dir, mas
     
     #Train
     runner = Runner.from_cfg(cfg)
-    runner.train()
+    try:
+      runner.train()
+    except Exception as ex:
+      print(ex)
 
 
 def test_unet(result_path, dataset, feature_dataset_choice, test_images_dir, mask_images_dir):
    # List all files in the input directory
    image_files = os.listdir(test_images_dir)
-   config_file = config.saved_models_path + "/UNET/" + dataset + '/Feature_' + str(feature_dataset_choice)+'/unet-s5-d16_fcn_4xb4-160k_cityscapes-512x1024.py'
-   checkpoint_file = config.saved_models_path + '/UNET/' + dataset + '/Feature_' + str(feature_dataset_choice)+'/iter_16000.pth'
+   config_file = config.saved_models_path + "/Unet/" + dataset + '/Feature_' + str(feature_dataset_choice)+'/unet-s5-d16_fcn_4xb4-160k_cityscapes-512x1024.py'
+   checkpoint_file = config.saved_models_path + '/Unet/' + dataset + '/Feature_' + str(feature_dataset_choice)+'/iter_16000.pth'
    device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
    model = init_model(config_file, checkpoint_file, device=device)
    total_iou = 0.0

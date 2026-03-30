@@ -77,7 +77,7 @@ def test_fcn(result_path, dataset, feature_dataset_choice, data_loader):
     print("Testing FCN on Feature: " + str(feature_dataset_choice) + " of " + dataset )
 
     model_path = config.saved_models_path + '/Fcn/' + dataset + '/Feature_' + str(feature_dataset_choice) + '/fcn_resnet101_segmentation.pth'
-
+    print("Loaded model from " + model_path)
     if not os.path.exists(model_path):
         print("The given model does not exist, Train the model before testing.")
         return
@@ -91,6 +91,10 @@ def test_fcn(result_path, dataset, feature_dataset_choice, data_loader):
     # Evaluate the model on the test dataset
     model.eval()  # Set the model to evaluation mode
     iou_scores = []
+
+    # Data details
+    print("Number of test images:", len(data_loader.dataset))
+    print("Batch size:", data_loader.batch_size)
 
     for images, masks in data_loader:  # Iterate over batches in the data loader
         if torch.cuda.is_available():

@@ -270,6 +270,21 @@ def get_feature_maps_hrnet(model, input_image):
     'HRModule[7][0]', 'HRModule[7][1]', 'HRModule[7][2]', 'HRModule[7][3]']
     return featuremaps, featuremap_names
 
+def save_last_layer_glcm_to_csv(glcm_results, result_path):
+    """
+    Save the last layer's GLCM results to a CSV file, preserving the original computed order.
+    """
+    properties = list(glcm_results.keys())  # Keep the computed order
+    values = list(glcm_results.values())  # Corresponding values
+    
+    df = pd.DataFrame([values], columns=properties)  # Keep order intact
+    
+    os.makedirs(Path(result_path).parent, exist_ok=True)
+    
+    df.to_csv(result_path, index=False)
+
+    print("Last layer's GLCM results saved to:", result_path)
+
 def analyze_GLCM_Unet(choice_dataset):
 
     if choice_dataset == 1:
@@ -356,6 +371,17 @@ def analyze_GLCM_Unet(choice_dataset):
     df_results.to_excel(result_path, index=False)
     print("Results saved to ", result_path)
 
+    last_featuremap = featuremaps[-1]  # Take the last layer
+    last_featuremap_name = featuremap_names[-1]  # Get the layer name
+    result_path_csv = config.results_path + '/GLCM/Unet/'+dataset+'/'+dataset+'_Unet_GLCM_LastLayer.csv'
+
+    print(f"Computing GLCM for last layer: {last_featuremap_name}")
+    glcm_results, _, _ = compute_and_visualize_glcm_properties_firstapproach(last_featuremap, gray_image)
+
+    save_last_layer_glcm_to_csv(glcm_results, result_path_csv)
+
+    print(f"Saved last layer GLCM results for {dataset}.")
+
 
 def analyze_GLCM_Hrnet(choice_dataset):
 
@@ -439,3 +465,13 @@ def analyze_GLCM_Hrnet(choice_dataset):
     df_results.to_excel(result_path, index=False)
     print("Results saved to ", result_path)
 
+    last_featuremap = featuremaps[-1]  # Take the last layer
+    last_featuremap_name = featuremap_names[-1]  # Get the layer name
+    result_path_csv = config.results_path + '/GLCM/Hrnet/'+dataset+'/'+dataset+'_HRNET_GLCM_LastLayer.csv'
+
+    print(f"Computing GLCM for last layer: {last_featuremap_name}")
+    glcm_results, _, _ = compute_and_visualize_glcm_properties_firstapproach(last_featuremap, gray_image)
+
+    save_last_layer_glcm_to_csv(glcm_results, result_path_csv)
+
+    print(f"Saved last layer GLCM results for {dataset}.")

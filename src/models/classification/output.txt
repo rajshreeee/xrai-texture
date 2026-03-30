@@ -1,0 +1,45 @@
+nohup: ignoring input
+Epoch 1, Loss: 1.7077
+Epoch 2, Loss: 1.6436
+Epoch 3, Loss: 1.6247
+Epoch 4, Loss: 1.6152
+Epoch 5, Loss: 1.6005
+Epoch 6, Loss: 1.5884
+Epoch 7, Loss: 1.5907
+Epoch 8, Loss: 1.5941
+Epoch 9, Loss: 1.5900
+Epoch 10, Loss: 1.5775
+Epoch 11, Loss: 1.5834
+Epoch 12, Loss: 1.5804
+Epoch 13, Loss: 1.5807
+Epoch 14, Loss: 1.5812
+Epoch 15, Loss: 1.5811
+Epoch 16, Loss: 1.5855
+Epoch 17, Loss: 1.5724
+Epoch 18, Loss: 1.5850
+Epoch 19, Loss: 1.5657
+Epoch 20, Loss: 1.5798
+BI-RADS Accuracy: 0.35342465753424657
+
+Classification Report:
+              precision    recall  f1-score   support
+
+           0       0.00      0.00      0.00        20
+           1       0.00      0.00      0.00         2
+           2       0.18      0.12      0.14        17
+           3       0.35      0.30      0.32        84
+           4       0.57      0.38      0.45       167
+           5       0.30      0.52      0.38        75
+
+    accuracy                           0.35       365
+   macro avg       0.24      0.22      0.22       365
+weighted avg       0.41      0.35      0.37       365
+
+
+Confusion Matrix:
+[[ 0  0  2  2  7  9]
+ [ 1  0  0  0  0  1]
+ [ 1  0  2  9  3  2]
+ [13  0  1 25 18 27]
+ [22  0  4 28 63 50]
+ [ 8  0  2  7 19 39]]

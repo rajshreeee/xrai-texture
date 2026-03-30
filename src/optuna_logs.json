@@ -1,0 +1,83 @@
+{
+    "trials": [
+        {
+            "trial_number": 0,
+            "params": {
+                "learning_rate": 5.1034227337605446e-05,
+                "batch_size": 8,
+                "num_epochs": 30
+            },
+            "value": 0.7705211440722147,
+            "state": "TrialState.COMPLETE"
+        },
+        {
+            "trial_number": 1,
+            "params": {
+                "learning_rate": 9.321507832345487e-05,
+                "batch_size": 8,
+                "num_epochs": 50
+            },
+            "value": 0.7744930999146568,
+            "state": "TrialState.COMPLETE"
+        },
+        {
+            "trial_number": 2,
+            "params": {
+                "learning_rate": 6.213242715738872e-05,
+                "batch_size": 4,
+                "num_epochs": 30
+            },
+            "value": 0.7787589331467947,
+            "state": "TrialState.COMPLETE"
+        },
+        {
+            "trial_number": 3,
+            "params": {
+                "learning_rate": 6.347441206211067e-05,
+                "batch_size": 8,
+                "num_epochs": 40
+            },
+            "value": 0.7715417444705963,
+            "state": "TrialState.COMPLETE"
+        },
+        {
+            "trial_number": 4,
+            "params": {
+                "learning_rate": 5.814777133591404e-05,
+                "batch_size": 4,
+                "num_epochs": 30
+            },
+            "value": 0.7756626937124464,
+            "state": "TrialState.COMPLETE"
+        },
+        {
+            "trial_number": 5,
+            "params": {
+                "learning_rate": 5.314779415894985e-05,
+                "batch_size": 4,
+                "num_epochs": 30
+            },
+            "value": 0.7776626646518707,
+            "state": "TrialState.COMPLETE"
+        },
+        {
+            "trial_number": 6,
+            "params": {
+                "learning_rate": 4.7751948374780065e-05,
+                "batch_size": 8,
+                "num_epochs": 50
+            },
+            "value": 0.7802354958322313,
+            "state": "TrialState.COMPLETE"
+        }
+    ],
+    "best_trial": {
+        "params": {
+            "learning_rate": 4.7751948374780065e-05,
+            "batch_size": 8,
+            "num_epochs": 50
+        },
+        "value": 0.7802354958322313,
+        "number": 6
+    }
+}

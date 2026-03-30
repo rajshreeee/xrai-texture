@@ -507,6 +507,8 @@ def cosine_similarity_analysis_textureimages(model_choice, dataset_choice):
                 hooks.append(layer.register_forward_hook(lambda module, input, output, name=name: hook_fn(module, input, output, name)))
                 print(f"Hook registered for layer: {name}")
     elif model_choice == 5 or model_choice == 6:
+        if isinstance(model, torch.nn.DataParallel):
+            model = model.module
         for name, layer in model.encoder.named_modules():
             if name in target_layers:
                 hooks.append(layer.register_forward_hook(lambda module, input, output, name=name: hook_fn(module, input, output, name)))

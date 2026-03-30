@@ -6,6 +6,8 @@ zip_url = "https://zenodo.org/records/10960991/files/CBIS-DDSM-Patches.zip?downl
 data_path = os.path.abspath(os.path.join(os.getcwd(), os.pardir)) + "/data"
 CBIS_DDSM_dataset_path = data_path + "/CBIS_DDSM"
 CBIS_DDSM_CLAHE_dataset_path = data_path + "/CBIS_DDSM_CLAHE"
+CBIS_DDSM_PATCHES=data_path+"/CBIS_DDSM_Patches_Mass_Context"
+CBIS_DDSM_LAPLACIAN=data_path+"/CBIS_DDSM_LAPLACIAN"
 
 HAM_dataset_path = data_path + "/HAM10000"
 HAM_CLAHE_dataset_path = data_path + "/HAM10000_CLAHE"

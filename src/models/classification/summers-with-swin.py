@@ -1,0 +1,530 @@
+import os
+import torch
+import timm
+import torch.nn as nn
+import torch.optim as optim
+from torchvision import transforms
+from torch.utils.data import Dataset, DataLoader, Subset
+from sklearn.model_selection import train_test_split
+from PIL import Image
+import pandas as pd
+import numpy as np
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+import time
+import matplotlib.pyplot as plt
+from torch.utils.data import ConcatDataset
+from albumentations.pytorch import ToTensorV2
+from skmultilearn.model_selection import IterativeStratification
+from torchvision import models
+from collections import Counter
+import torch.nn.functional as F
+from sklearn.utils.class_weight import compute_class_weight
+
+
+
+train_path = "/ediss_data/ediss2/xai-texture/data/CBIS_DDSM_Patches_Mass_Context/train/L5E5_aug_masked_images"
+test_path = "/ediss_data/ediss2/xai-texture/data/CBIS_DDSM_Patches_Mass_Context/test/L5E5_aug_masked_images"
+csv_file = "/ediss_data/ediss2/xai-texture/data/CBIS_DDSM_Patches_Mass_Context/CBIS_DDSM_PATCHED_ANNOTATIONS_CONTEXT.csv"
+batch_size = 32
+num_epochs = 30 
+learning_rate = 1e-4
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+class FocalLoss(torch.nn.Module):
+    def __init__(self, gamma=2.0, weight=None):
+        super().__init__()
+        self.gamma = gamma
+        self.weight = weight  # pass class weights if needed
+
+    def forward(self, logits, targets):
+        ce_loss = F.cross_entropy(logits, targets, weight=self.weight, reduction='none')
+        pt = torch.exp(-ce_loss)
+        focal_loss = ((1 - pt) ** self.gamma) * ce_loss
+        return focal_loss.mean()
+
+class BCEDiceLoss(torch.nn.Module):
+    def __init__(self, smooth=1.0):
+        super().__init__()
+        self.smooth = smooth
+        self.bce = torch.nn.BCEWithLogitsLoss()
+
+    def forward(self, logits, targets):
+        bce_loss = self.bce(logits, targets)
+
+        probs = torch.sigmoid(logits)
+        targets = targets.float()
+
+        intersection = (probs * targets).sum()
+        dice = (2. * intersection + self.smooth) / (probs.sum() + targets.sum() + self.smooth)
+        dice_loss = 1 - dice
+
+        return bce_loss + dice_loss
+
+
+class CBISDDSMDataset(Dataset):
+    def __init__(self, image_dir, csv_file, transform=None):
+        self.image_dir = image_dir
+        self.transform = transform
+
+        self.data = pd.read_csv(csv_file)
+        print(f"[INFO] CSV loaded: {csv_file}, Total rows: {len(self.data)}")
+
+        # Treat 'benign_without_callback' as 'benign'
+        self.data['pathology'] = self.data['pathology'].str.lower().replace('benign_without_callback', 'benign')
+
+        # Filter valid entries
+        valid_pathologies = {"malignant", "benign"}
+        valid_shapes = {"round", "oval", "lobulated", "irregular"}
+        valid_birads = {2, 3, 4, 5}
+
+        self.data = self.data[
+            (self.data['pathology'].isin(valid_pathologies)) &
+            (self.data['mass shape'].str.lower().isin(valid_shapes)) &
+            (self.data['assessment'].isin(valid_birads))
+        ].reset_index(drop=True)
+
+        print(f"[INFO] Filtered rows: {len(self.data)}")
+
+        self.image_files = [f for f in os.listdir(image_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+        print(f"[INFO] Found {len(self.image_files)} images.")
+
+        # Define mappings
+        self.pathology_classes = {"benign": 0, "malignant": 1}
+        self.shape_classes = {"round": 0, "oval": 1, "lobulated": 2, "irregular": 3}
+        self.birads_mapping = {2: 0, 3: 1, 4: 2, 5: 3}
+
+    def __len__(self):
+        return len(self.image_files)
+
+    def __getitem__(self, idx):
+        image_name = self.image_files[idx]
+        image_path = os.path.join(self.image_dir, image_name)
+
+        base_name = os.path.splitext(image_name)[0].split('#')[0]
+
+        image = Image.open(image_path).convert("RGB")
+        matching_rows = self.data[self.data['image_name'] == base_name]
+
+        if matching_rows.empty:
+            return self.__getitem__((idx + 1) % len(self.image_files))
+
+        row = matching_rows.iloc[0]
+
+        pathology = self.pathology_classes.get(row['pathology'], 1)
+        shape = self.shape_classes.get(str(row['mass shape']).lower(), 3)
+
+        birads_raw = int(row['assessment'])
+        birads = self.birads_mapping.get(birads_raw, None)
+        if birads is None:
+            return self.__getitem__((idx + 1) % len(self.image_files))
+
+        if self.transform:
+            image = self.transform(image)
+
+        labels = torch.tensor([pathology, shape, birads], dtype=torch.long)
+
+        return image, labels
+
+    def get_all_labels(self):
+        labels = []
+        for _, row in self.data.iterrows():
+            pathology = self.pathology_classes.get(row["pathology"], 1)
+            mass_shape = self.shape_classes.get(str(row["mass shape"]).lower(), 3)
+            birads_raw = int(row["assessment"])
+            birads = self.birads_mapping.get(birads_raw, 4)  # Map BIRADS correctly
+            labels.append(torch.tensor([pathology, mass_shape, birads]))
+        return labels
+
+def load_swin_model(model_name="swin_tiny_patch4_window7_224"):
+    model = timm.create_model(model_name, pretrained=True, features_only=False, num_classes=0)
+    for param in model.parameters():
+        param.requires_grad = False
+    for name, param in model.named_parameters():
+        if "norm" in name or "head" in name or "layers.3" in name:
+            param.requires_grad = True
+    return model
+
+
+class SwinClassifier(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.swin = load_swin_model()  # 768-d output from timm
+        self.shared_dim = 768
+
+        self.fc_pathology = nn.Sequential(
+            nn.Linear(self.shared_dim, 512),
+            nn.ReLU(),
+            nn.Dropout(0.5),
+            nn.Linear(512, 1)
+        )
+
+        self.fc_birads = nn.Sequential(
+            nn.Linear(self.shared_dim, 512),
+            nn.ReLU(),
+            nn.Dropout(0.5),
+            nn.Linear(512, 4)
+        )
+
+        self.fc_shape = nn.Sequential(
+            nn.Linear(self.shared_dim, 512),
+            nn.ReLU(),
+            nn.Dropout(0.5),
+            nn.Linear(512, 4)
+        )
+
+    def forward(self, x):
+        f = self.swin(x)  # [B, 768]
+
+        out_pathology = self.fc_pathology(f)
+        out_birads    = self.fc_birads(f)
+        out_shape     = self.fc_shape(f)
+        return out_pathology, out_birads, out_shape
+
+    
+# ========= Prepare Data =========
+transform = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.5]*3, std=[0.5]*3)
+])
+
+train_dataset = CBISDDSMDataset(train_path, csv_file, transform=transform)
+test_dataset_extra = CBISDDSMDataset(test_path, csv_file, transform=transform)
+combined_dataset = ConcatDataset([train_dataset, test_dataset_extra])
+
+
+# 1. Prepare multilabel matrix
+all_labels = []
+for i in range(len(combined_dataset)):
+    _, labels = combined_dataset[i]
+    all_labels.append(labels)
+
+# Stack into (n_samples, 3) [pathology, shape, birads]
+all_labels_np = torch.stack(all_labels).numpy()
+
+print("[INFO] Overall dataset size:", len(all_labels_np))
+
+pathology_counts = Counter(all_labels_np[:, 0])
+shape_counts = Counter(all_labels_np[:, 1])
+birads_counts = Counter(all_labels_np[:, 2])
+
+print("Pathology distribution (0=benign,1=malignant):", dict(pathology_counts))
+print("Shape distribution (0=round,1=oval,2=lobulated,3=irregular):", dict(shape_counts))
+print("BIRADS distribution (0->B2,1->B3,2->B4,3->B5):", dict(birads_counts))
+
+from iterstrat.ml_stratifiers import MultilabelStratifiedKFold
+import numpy as np
+import os
+
+# ------------------------------------------------------------------
+# 0. alias
+multi_labels = all_labels_np          # shape (N, 3)
+
+# ------------------------------------------------------------------
+# 1. build group_ids list – ONE entry per file, SAME order as combined_dataset
+# ------------------------------------------------------------------
+group_ids = []
+
+# first the files from train_dataset …
+for fname in train_dataset.image_files:
+    base = os.path.splitext(fname)[0].split('#')[0]      # “case-id” before #
+    group_ids.append(base)
+
+# … then the files from test_dataset_extra (ConcatDataset keeps this order)
+for fname in test_dataset_extra.image_files:
+    base = os.path.splitext(fname)[0].split('#')[0]
+    group_ids.append(base)
+
+group_ids = np.array(group_ids)
+assert len(group_ids) == len(multi_labels), "group_ids length mismatch!"
+
+# ------------------------------------------------------------------
+# 2. collapse to group level
+# ------------------------------------------------------------------
+unique_groups, inverse = np.unique(group_ids, return_inverse=True)
+G = len(unique_groups)
+
+group_labels = np.zeros((G, multi_labels.shape[1]), dtype=int)
+for g in range(G):
+    group_labels[g] = multi_labels[inverse == g].max(axis=0)
+    # 'max' = logical-OR because each column is a single-label task
+
+# ------------------------------------------------------------------
+# 3. stratified split ON groups
+# ------------------------------------------------------------------
+mskf = MultilabelStratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+train_g, valtest_g = next(mskf.split(np.zeros(G), group_labels))
+
+# optional 50-50 split of val/test groups
+mskf2 = MultilabelStratifiedKFold(n_splits=2, shuffle=True, random_state=42)
+val_g, test_g = next(mskf2.split(np.zeros(len(valtest_g)),
+                                 group_labels[valtest_g]))
+val_g  = valtest_g[val_g]
+test_g = valtest_g[test_g]
+
+# ------------------------------------------------------------------
+# 4. map group indices back to FILE indices
+# ------------------------------------------------------------------
+train_idx = np.where(np.isin(inverse, train_g))[0]
+val_idx   = np.where(np.isin(inverse, val_g))[0]
+test_idx  = np.where(np.isin(inverse, test_g))[0]
+
+
+def print_split_distribution(indices, name):
+    labels = all_labels_np[indices]
+    pathology_counts = Counter(labels[:, 0])
+    shape_counts = Counter(labels[:, 1])
+    birads_counts = Counter(labels[:, 2])
+    print(f"\n[INFO] {name} size: {len(indices)}")
+    print("Pathology distribution:", dict(pathology_counts))
+    print("Shape distribution:", dict(shape_counts))
+    print("BIRADS distribution:", dict(birads_counts))
+
+
+print_split_distribution(train_idx, "TRAIN")
+print_split_distribution(val_idx,   "VALID")
+print_split_distribution(test_idx,  "TEST")
+
+# 5. Print distributions after split
+
+
+# 6. Final DataLoaders
+train_loader = DataLoader(Subset(combined_dataset, train_idx), batch_size=batch_size, shuffle=True, num_workers=16, pin_memory=True)
+val_loader = DataLoader(Subset(combined_dataset, val_idx), batch_size=batch_size, shuffle=False, num_workers=16, pin_memory=True)
+test_loader = DataLoader(Subset(combined_dataset, test_idx), batch_size=batch_size, shuffle=False, num_workers=16, pin_memory=True)
+
+print(f"\nFinal Split Sizes --> Train: {len(train_idx)} | Val: {len(val_idx)} | Test: {len(test_idx)}")
+
+
+shape_labels = all_labels_np[:, 1]  # shape column
+shape_classes = np.unique(shape_labels)
+
+shape_weights = compute_class_weight(class_weight='balanced',
+                                     classes=shape_classes,
+                                     y=shape_labels)
+shape_weights = torch.tensor(shape_weights, dtype=torch.float).to(device)
+
+# === BIRADS Class Weights ===
+birads_labels = all_labels_np[:, 2]
+birads_classes = np.unique(birads_labels)
+
+birads_weights = compute_class_weight(class_weight='balanced',
+                                      classes=birads_classes,
+                                      y=birads_labels)
+birads_weights = torch.tensor(birads_weights, dtype=torch.float).to(device)
+
+
+# ==== Model, Losses, Optimizer ====
+model = SwinClassifier().to(device)
+
+if torch.cuda.device_count() > 1:
+    print(f"[INFO] Using {torch.cuda.device_count()} GPUs")
+    model = nn.DataParallel(model)
+
+optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=1e-4)
+
+loss_pathology = BCEDiceLoss()
+loss_shape = FocalLoss(gamma=2.0, weight=shape_weights)
+loss_birads = FocalLoss(gamma=2.0, weight=birads_weights)
+scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=2)
+
+early_stopping_patience = 5
+best_val_loss = float('inf')
+epochs_no_improve = 0
+
+train_losses, val_losses = [], []
+train_accuracies, val_accuracies = [], []
+val_accuracies_pathology, val_accuracies_shape, val_accuracies_birads = [], [], []
+
+start_time = time.time()
+# ==== Training Loop ====
+for epoch in range(num_epochs):
+    model.train()
+    running_loss = 0
+
+    for images, labels in train_loader:
+        images, labels = images.to(device), labels.to(device)
+
+        pathology_labels = labels[:, 0]
+        shape_labels = labels[:, 1]
+        birads_labels = labels[:, 2:].long()
+
+
+        pathology_targets = labels[:, 0].float().unsqueeze(1)  # float + unsqueeze for BCE
+        shape_targets = labels[:, 1].long()
+        birads_targets = labels[:, 2].long()
+
+        optimizer.zero_grad()
+        out_pathology, out_birads, out_shape = model(images)
+
+        loss1 = loss_pathology(out_pathology, pathology_targets)
+        loss2 = loss_birads(out_birads, birads_targets)
+        loss3 = loss_shape(out_shape, shape_targets)
+
+        total_loss = loss1 + loss2 + loss3
+
+        total_loss.backward()
+        optimizer.step()
+        running_loss += total_loss.item()
+
+    avg_train_loss = running_loss / len(train_loader)
+
+    # ==== Validation ====
+    model.eval()
+    val_loss = 0
+
+    preds_path, targets_path = [], []
+    preds_shape, targets_shape = [], []
+    preds_birads, targets_birads = [], []
+
+    with torch.no_grad():
+        for images, labels in val_loader:
+            images, labels = images.to(device), labels.to(device)
+
+            pathology_targets = labels[:, 0].unsqueeze(1).float()
+            shape_targets = labels[:, 1].long()
+            birads_targets = labels[:, 2].long()
+
+            out_pathology, out_birads, out_shape = model(images)
+
+            loss1 = loss_pathology(out_pathology, pathology_targets)
+            loss2 = loss_birads(out_birads, birads_targets)
+            loss3 = loss_shape(out_shape, shape_targets)
+            total_val = loss1 + loss2 + loss3
+            val_loss += total_val.item()
+
+            # --- Pathology predictions ---
+            probs_pathology = torch.sigmoid(out_pathology)
+            pred_labels_path = (probs_pathology > 0.5).long().cpu().numpy()
+            preds_path.extend(pred_labels_path.flatten())
+            targets_path.extend(pathology_targets.cpu().numpy().flatten())
+
+            # --- Shape predictions ---
+            pred_labels_shape = out_shape.argmax(dim=1).cpu().numpy()
+            preds_shape.extend(pred_labels_shape.flatten())
+            targets_shape.extend(shape_targets.cpu().numpy().flatten())
+
+            # --- BIRADS predictions ---
+            pred_labels_birads = out_birads.argmax(dim=1).cpu().numpy()
+            preds_birads.extend(pred_labels_birads.flatten())
+            targets_birads.extend(birads_targets.cpu().numpy().flatten())
+
+    avg_val_loss = val_loss / len(val_loader)
+
+    # === Compute all accuracies ===
+    val_acc_path = accuracy_score(targets_path, preds_path)
+    val_acc_shape = accuracy_score(targets_shape, preds_shape)
+    val_acc_birads = accuracy_score(targets_birads, preds_birads)
+
+    scheduler.step(avg_val_loss)
+
+    train_losses.append(avg_train_loss)
+    val_losses.append(avg_val_loss)
+
+    # Save all accuracies separately
+    val_accuracies_pathology.append(val_acc_path)
+    val_accuracies_shape.append(val_acc_shape)
+    val_accuracies_birads.append(val_acc_birads)
+
+    # --- Print all ---
+    print(f"Epoch {epoch+1}/{num_epochs} | "
+        f"Train Loss={avg_train_loss:.4f} | Val Loss={avg_val_loss:.4f} | "
+        f"Pathology Acc={val_acc_path:.4f} | Shape Acc={val_acc_shape:.4f} | BIRADS Acc={val_acc_birads:.4f}")
+
+    # === Early Stopping ===
+    if avg_val_loss < best_val_loss:
+        best_val_loss = avg_val_loss
+        epochs_no_improve = 0
+    else:
+        epochs_no_improve += 1
+        if epochs_no_improve >= early_stopping_patience:
+            print(f"[INFO] Early stopping triggered at epoch {epoch+1}")
+            break
+
+end_time = time.time()
+elapsed_time_minutes = (end_time - start_time) / 60
+
+print(f"Training time: {elapsed_time_minutes:.2f} minutes")
+
+# ==== Test Evaluation (Pathology, Shape, BIRADS) ====
+model.eval()
+
+# Separate lists for each task
+preds_path, targets_path = [], []
+preds_shape, targets_shape = [], []
+preds_birads, targets_birads = [], []
+
+with torch.no_grad():
+    for images, labels in test_loader:
+        images, labels = images.to(device), labels.to(device)
+        out_pathology, out_birads, out_shape = model(images)
+
+        # --- Pathology ---
+        probs_pathology = torch.sigmoid(out_pathology)
+        pred_labels_path = (probs_pathology > 0.5).long().cpu().numpy()
+        preds_path.extend(pred_labels_path.flatten())
+        targets_path.extend(labels[:, 0].cpu().numpy().flatten())
+
+        # --- Shape ---
+        pred_labels_shape = out_shape.argmax(dim=1).cpu().numpy()
+        preds_shape.extend(pred_labels_shape.flatten())
+        targets_shape.extend(labels[:, 1].cpu().numpy().flatten())
+
+        # --- BIRADS ---
+        pred_labels_birads = out_birads.argmax(dim=1).cpu().numpy()
+        preds_birads.extend(pred_labels_birads.flatten())
+        targets_birads.extend(labels[:, 2].cpu().numpy())
+
+# === Print Final Metrics ===
+
+print("\n========= [INFO] Final Test Results =========")
+
+print("\n--- Pathology Classification ---")
+print("Accuracy:", accuracy_score(targets_path, preds_path))
+print("Classification Report:\n", classification_report(targets_path, preds_path))
+print("Confusion Matrix:\n", confusion_matrix(targets_path, preds_path))
+
+print("\n--- Shape Classification ---")
+print("Accuracy:", accuracy_score(targets_shape, preds_shape))
+print("Classification Report:\n", classification_report(targets_shape, preds_shape))
+print("Confusion Matrix:\n", confusion_matrix(targets_shape, preds_shape))
+
+print("\n--- BIRADS Classification ---")
+print("Accuracy:", accuracy_score(targets_birads, preds_birads))
+print("Classification Report:\n", classification_report(targets_birads, preds_birads))
+print("Confusion Matrix:\n", confusion_matrix(targets_birads, preds_birads))
+
+# ==== Save Training Curves ====
+os.makedirs("summer-all-one-swin", exist_ok=True)
+epochs_range = range(1, len(train_losses) + 1)
+
+plt.figure(figsize=(18, 8))
+
+# Loss curve
+plt.subplot(1, 2, 1)
+plt.plot(epochs_range, train_losses, label='Train Loss')
+plt.plot(epochs_range, val_losses, label='Val Loss')
+plt.xlabel('Epochs')
+plt.ylabel('Loss')
+plt.title('Loss Curve')
+plt.legend()
+
+# Accuracy curves
+plt.subplot(1, 2, 2)
+plt.plot(epochs_range, val_accuracies_pathology, label='Pathology Acc')
+plt.plot(epochs_range, val_accuracies_shape, label='Shape Acc')
+plt.plot(epochs_range, val_accuracies_birads, label='BIRADS Acc')
+plt.xlabel('Epochs')
+plt.ylabel('Accuracy')
+plt.title('Validation Accuracies Curve')
+plt.legend()
+
+plt.tight_layout()
+plt.savefig("summer-all-one-swin/training_curves.png")
+plt.close()
+
+print("[INFO] Training plots saved to final-stacked-ensemble-plots")
+
+torch.save(model.state_dict(), "summer-all-one-swin.pth")
+print("[INFO] Model saved as summer-all-one-swin.pth")
