@@ -1,0 +1,4 @@
+,seed,seed,best_dice,best_dice,dice_epoch5,dice_epoch5,dice_epoch10,dice_epoch10,dice_epoch20,dice_epoch20
+,mean,std,mean,std,mean,std,mean,std,mean,std
+group,,,,,,,,,,
+D_layer1_init,446.8,434.5615,0.7809,0.0018,0.7479,0.0088,0.7535,0.0112,0.7708,0.0022

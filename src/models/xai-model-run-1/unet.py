@@ -18,15 +18,18 @@ import cv2
 from logger import setup_logger
 
 SEEDS = [42, 123, 256, 789, 1024]
+
+# 1. Used the same validation split across all seeds
+# 2. 
 EPOCHS = 50
 BATCH_SIZE = 8
 LR = 1e-4
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-SPLIT_INDICES_PATH = "/ediss_data/ediss2/xai-texture/src/models/xai-model/data/split_indices.json"  # fixed split saved once
+SPLIT_INDICES_PATH = "/ediss_data/ediss2/xai-texture/src/models/xai-model/data/split_indices.json" 
 CHECKPOINT_DIR = Path("/ediss_data/ediss2/xai-texture/src/models/xai-model/checkpoints")
 CHECKPOINT_DIR.mkdir(exist_ok=True)
 
-kernels = {
+kernels_by_layer = {
     "layer3": [
         np.array([
             [-0.66570723, -0.12788272, -0.09561324],
@@ -70,6 +73,8 @@ kernels = {
     ]
 }
 
+kernels = [k for kernel_values in kernels_by_layer.values() for k in kernel_values]
+
 def build_model(seed, inject_layer=None):
     """
     inject_layer: None (baseline), 'layer2', or 'layer3'
@@ -91,32 +96,30 @@ def build_model(seed, inject_layer=None):
     return model.to(DEVICE)
 
 
-def inject_kernels(model, layer_name, kernels):
+def inject_kernels(model, layer_name, kernels_list):
     """
-    Inject kernels into the first conv of the specified ResNet-18 encoder layer.
-    layer_name: 'layer2' or 'layer3'
+    Strategy 2: fill ALL output channels of the target conv with structured kernels.
+    We cycle through kernels_list so every channel gets a kernel, not just the first few.
+    
+    layer_name: 'layer1', 'layer2', or 'layer3' (target the earliest layer for texture bias)
     """
-    # Access the target conv weight
-    # ResNet-18 encoder layer structure: encoder.layer{N}[0].conv1.weight
-    # Shape: (out_channels, in_channels, 3, 3)
     target = getattr(model.encoder, layer_name)
-    conv_weight = target[0].conv1.weight  # (C_out, C_in, 3, 3)
-
-    n_kernels = len(kernels)
+    conv_weight = target[0].conv1.weight  # shape: (C_out, C_in, 3, 3)
+    
     n_out = conv_weight.shape[0]
+    n_in  = conv_weight.shape[1]
+    n_kernels = len(kernels_list)
 
-    print(f"Injecting {n_kernels} kernels into encoder.{layer_name}[0].conv1 "
-          f"(shape: {conv_weight.shape})")
+    print(f"Injecting into encoder.{layer_name}[0].conv1 | shape: {conv_weight.shape}")
+    print(f"Cycling {n_kernels} kernels across {n_out} output channels × {n_in} input channels")
 
     with torch.no_grad():
-        for i, k in enumerate(kernels):
-            if i >= n_out:
-                print(f"  Warning: more kernels than output channels, stopping at {i}")
-                break
+        for out_idx in range(n_out):
+            k = kernels_list[out_idx % n_kernels]
             k_tensor = torch.tensor(k, dtype=torch.float32)
-            # Inject into first in_channel slot (mammography is single channel input by this layer too)
-            conv_weight[i, 0, :, :] = k_tensor
-            print(f"  Injected kernel {i} → channel {i}")
+            
+            for in_idx in range(n_in):
+                conv_weight[out_idx, in_idx, :, :] = k_tensor
 
 
 def dice_score(pred, target, threshold=0.5, eps=1e-6):
@@ -257,9 +260,10 @@ def main():
 
     # --- Phase 1 Conditions ---
     conditions = [
-        ("A_baseline",      None),
-        ("B_layer2_init",   "layer2"),
-        ("C_layer3_init",   "layer3"),
+        # ("A_baseline",      None),
+        # ("B_layer2_init",   "layer2"),
+        # ("C_layer3_init",   "layer3"),
+        ("D_layer1_init",   "layer1"),
     ]
 
     all_results = []
