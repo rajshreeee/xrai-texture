@@ -21,9 +21,9 @@ import config
 import random
 
 # SEEDS = [42, 123, 256]
-SEEDS = [42]
+SEEDS = [123, 256]
 
-EPOCHS = 20
+EPOCHS = 80
 BATCH_SIZE = 8
 LR = 1e-5
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -33,33 +33,33 @@ CHECKPOINT_DIR.mkdir(exist_ok=True)
 kernels_by_layer = {
     "layer3": [
         np.array([
-            [-0.66570723, -0.12788272, -0.09561324],
-            [-0.06334380,  0.48523712,  0.45296767],
-            [-0.23544757,  0.13027307,  0.11951658]
+            [-0.11768152, -0.02260669, -0.01690219],
+            [-0.01119771,  0.08577861,  0.08007413],
+            [-0.04162164,  0.02302924,  0.02112775]
         ], dtype=np.float32),
         np.array([
-            [-0.45346430,  0.10560124, -0.19256702],
-            [-0.09007170,  0.49694710,  0.38513404],
-            [-0.54664180,  0.13355458,  0.16150787]
+            [-0.08016192,  0.01866784, -0.03404136],
+            [-0.01592258,  0.08784867,  0.06808272],
+            [-0.09663353,  0.02360934,  0.02855083]
         ], dtype=np.float32)
     ],
     "layer4": [
         np.array([
-            [-0.70573944, -0.18723700, -0.10081992],
-            [-0.18723700,  0.29885903,  0.33126545],
-            [-0.10081992,  0.33126545,  0.32046336]
+        [-0.12475829, -0.03309914, -0.01782261],
+        [-0.03309914,  0.05283131,  0.05856001],
+        [-0.01782261,  0.05856001,  0.05665045]
         ], dtype=np.float32)
     ],
     "classifier": [
         np.array([
-            [-0.42984945, -0.04796607, -0.42154756],
-            [-0.04796607,  0.52485900,  0.27580470],
-            [-0.37173668,  0.32561558,  0.19278659]
+       [-0.07598736, -0.00847928, -0.07451978],
+       [-0.00847928,  0.09278284,  0.04875584],
+       [-0.06571438,  0.05756124,  0.03408018]
         ], dtype=np.float32),
         np.array([
-            [-0.74325246, -0.07556172, -0.17447884],
-            [-0.07556172,  0.44375327,  0.29537760],
-            [-0.11265561,  0.29537760,  0.14700192]
+       [-0.13138972, -0.01335755, -0.03084379],
+       [-0.01335755,  0.07844524,  0.05221588],
+       [-0.01991489,  0.05221588,  0.02598652]
         ], dtype=np.float32)
     ]
 }
@@ -91,7 +91,7 @@ def build_model(seed, inject_layer=None):
 
     if inject_layer is not None:
         if inject_layer == "all":
-            for layer_name in ["layer1", "layer2", "layer3"]:
+            for layer_name in ["layer1", "layer2"]:
                 inject_kernels(model, layer_name, kernels)
         else:
             inject_kernels(model, inject_layer, kernels)
@@ -148,7 +148,7 @@ def train_one_run(group_name, seed, inject_layer, train_loader, val_loader, test
     # ✏️ CHANGE: cosine LR decay added
     
 
-    scheduler = CosineAnnealingLR(optimizer, T_max=EPOCHS - 10, eta_min=1e-6)
+    scheduler = CosineAnnealingLR(optimizer, T_max=EPOCHS, eta_min=1e-6)
 
     logger = setup_logger(group_name, seed)
     logger.info(f"Starting | group={group_name} | seed={seed} | inject_layer={inject_layer} | device={DEVICE}")
@@ -300,10 +300,10 @@ def compute_kernel_drift(group_name, seed, inject_layer, kernels_3x3):
 def main():
     conditions = [
         ("A_baseline",       None),
-        ("B_layer2_init",    "layer2"),
+        # ("B_layer2_init",    "layer2"),
         # ("C_layer3_init",    "layer3"),
         # ("D_layer1_init",    "layer1"),
-        ("E_alllayers_init", "all"),
+        # ("E_alllayers_init", "all"),
     ]
 
     all_results = []
