@@ -3,6 +3,8 @@ import numpy as np
 from pathlib import Path
 
 
+CHECKPOINTS = list(range(1, 21, 1))
+
 def parse_log_file(log_path):
     # New format with train_dice/train_iou
     epoch_pattern = re.compile(
@@ -90,13 +92,12 @@ def get_at_epoch(series, epochs, ep):
         return series[ep - 1]
     return None
 
-
 def print_per_seed_tables(all_data, metric="val_iou", checkpoints=None):
     if checkpoints is None:
-        checkpoints = list(range(5, 101, 5))
+        checkpoints = CHECKPOINTS
 
     baseline       = "A_baseline"
-    compare_groups = [g for g in ["B_layer2_init", "C_layer3_init", "D_layer1_init"]
+    compare_groups = [g for g in ["B_layer2_init", "C_layer3_init", "D_layer1_init", "E_alllayers_init"]
                       if g in all_data]
     label          = "Train IoU" if metric == "train_iou" else "Val IoU"
 
@@ -126,7 +127,7 @@ def print_per_seed_tables(all_data, metric="val_iou", checkpoints=None):
             print(f"  {'Epoch':>6} | {'A_baseline':>10} | {short:>12} | {'Δ':>8}")
             print(f"  {'-'*46}")
 
-            for ep in checkpoints:
+            for ep in CHECKPOINTS:
                 a_val = get_at_epoch(a_series, epochs_A, ep)
                 g_val = get_at_epoch(g_series, epochs_G, ep)
                 if a_val is None or g_val is None:
@@ -138,7 +139,7 @@ def print_per_seed_tables(all_data, metric="val_iou", checkpoints=None):
 
 def print_aggregate_tables(all_data, metric="val_iou", checkpoints=None):
     if checkpoints is None:
-        checkpoints = list(range(5, 101, 5))
+        checkpoints = CHECKPOINTS
 
     baseline       = "A_baseline"
     compare_groups = [g for g in ["B_layer2_init", "C_layer3_init", "D_layer1_init"]
@@ -156,7 +157,7 @@ def print_aggregate_tables(all_data, metric="val_iou", checkpoints=None):
         print(f"  {'Epoch':>6} | {'A  mean±std':>16} | {'Grp mean±std':>16} | {'Δ mean':>8} | {'Δ std':>7}")
         print(f"  {'-'*64}")
 
-        for ep in checkpoints:
+        for ep in CHECKPOINTS:
             a_vals = [get_at_epoch(s, epochs_A, ep) for s in all_data[baseline][metric]]
             g_vals = [get_at_epoch(s, epochs_G, ep) for s in all_data[grp][metric]]
             a_vals = [v for v in a_vals if v is not None]
@@ -187,7 +188,75 @@ def print_aggregate_tables(all_data, metric="val_iou", checkpoints=None):
         print(f"  {grp:<22} | {gm:>10.4f} | {gs:>7.4f} | {gm - a_bm:>+8.4f}")
 
 
-def run_analysis(log_dir):
+KEY_EPOCHS    = CHECKPOINTS
+EARLY_PHASE   = list(range(1, 16))   # ep 1–15
+LATE_PHASE    = list(range(16, 21))  # ep 16–20
+
+def print_table1(all_data, metric="val_iou"):
+    baseline = "A_baseline"
+    groups   = [g for g in ["B_layer2_init", "C_layer3_init", "E_alllayers_init"]
+                if g in all_data]
+    label    = "Val IoU" if metric == "val_iou" else "Train IoU"
+    epochs_A = all_data[baseline]["epochs"]
+
+    short = {
+        "B_layer2_init":    "B_L2",
+        "C_layer3_init":    "C_L3",
+        "D_layer1_init":    "D_L1",
+        "E_alllayers_init": "E_All"
+    }
+
+    header = f"  {'Epoch':>6} | {'A_baseline':>14}"
+    for g in groups:
+        header += f" | {short[g]+' (mean±std)':>18} | {'Δ':>7}"
+
+    print(f"\n{'='*120}")
+    print(f"  TABLE 1 — {label}: mean ± std at key epochs (all seeds)")
+    print(f"{'='*120}")
+    print(header)
+    print(f"  {'-'*110}")
+
+    # ← THIS BLOCK WAS MISSING
+    for ep in KEY_EPOCHS:
+        a_vals = [get_at_epoch(s, epochs_A, ep) for s in all_data[baseline][metric]]
+        a_vals = [v for v in a_vals if v is not None]
+        if not a_vals:
+            continue
+        a_mean, a_std = np.mean(a_vals), np.std(a_vals)
+        row = f"  {ep:>6} | {a_mean:.4f}±{a_std:.4f}"
+
+        for g in groups:
+            epochs_G = all_data[g]["epochs"]
+            g_vals   = [get_at_epoch(s, epochs_G, ep) for s in all_data[g][metric]]
+            g_vals   = [v for v in g_vals if v is not None]
+            if not g_vals:
+                row += f" | {'N/A':>18} | {'N/A':>7}"
+                continue
+            g_mean, g_std = np.mean(g_vals), np.std(g_vals)
+            deltas        = [gv - av for gv, av in zip(g_vals, a_vals)]
+            d_mean        = np.mean(deltas)
+            flag          = "▲" if d_mean > 0.001 else ("▼" if d_mean < -0.001 else "~")
+            row += f" | {g_mean:.4f}±{g_std:.4f}      | {d_mean:>+7.4f}{flag}"
+        print(row)
+
+    # Best Dice row
+    print(f"  {'-'*110}")
+    a_best = [v for v in all_data[baseline]["best_dice"] if v is not None]
+    a_bm, a_bs = np.mean(a_best), np.std(a_best)
+    row = f"  {'Best':>6} | {a_bm:.4f}±{a_bs:.4f}"
+    for g in groups:
+        g_best = [v for v in all_data[g]["best_dice"] if v is not None]
+        if not g_best:
+            row += f" | {'N/A':>18} | {'N/A':>7}"
+            continue
+        gm, gs = np.mean(g_best), np.std(g_best)
+        d      = gm - a_bm
+        flag   = "▲" if d > 0.001 else ("▼" if d < -0.001 else "~")
+        row += f" | {gm:.4f}±{gs:.4f}      | {d:>+7.4f}{flag}"
+    print(row)
+
+
+def run_analysis(log_dir, seeds=None):
     print(f"\nLoading logs from: {log_dir}")
     all_data = load_all_logs(log_dir)
 
@@ -195,17 +264,23 @@ def run_analysis(log_dir):
         print("No logs found — check your log directory path.")
         return
 
+    # --- Filter seeds here ---
+    if seeds is not None:
+        for group in all_data:
+            keep_idx = [i for i, s in enumerate(all_data[group]["seeds"]) if s in seeds]
+            all_data[group]["seeds"]     = [all_data[group]["seeds"][i]     for i in keep_idx]
+            all_data[group]["best_dice"] = [all_data[group]["best_dice"][i] for i in keep_idx]
+            for metric in ["val_dice","val_iou","val_loss","train_iou","train_loss"]:
+                all_data[group][metric]  = [all_data[group][metric][i]      for i in keep_idx]
+        print(f"  Filtered to seeds: {seeds}")
+
     print(f"\nGroups found: {list(all_data.keys())}")
     for g, d in all_data.items():
         print(f"  {g}: {len(d['seeds'])} seeds → {d['seeds']}")
 
-    print_per_seed_tables(all_data, metric="train_iou")
     print_per_seed_tables(all_data, metric="val_iou")
-    print_aggregate_tables(all_data, metric="train_iou")
-    print_aggregate_tables(all_data, metric="val_iou")
-
-
+    print_table1(all_data, metric="val_iou")
 if __name__ == "__main__":
     # import sys
     # log_dir = sys.argv[1] if len(sys.argv) > 1 else "./logs"
-    run_analysis("/ediss_data/ediss2/xai-texture/src/models/xai-model-run-2/logs")
+    run_analysis("/ediss_data/ediss2/xai-texture/src/models/xai-model-run-2/logs", seeds=[42, 123, 1024])
