@@ -30,7 +30,7 @@ DOMAIN_FOLDERS = {
     "xai-model-run-baseline/logs": "Baseline",
     "xai-model-run3-ft/logs":      "Fourier",
     "xai-model-run4-kr/logs":      "Kernel Ranking",
-    # "xai-model-run6-ltem/logs":  "Laws (LTEM)",
+    "xai-model-run6-ltem/logs":  "Laws (LTEM)",
 }
 
 LAYER_PATTERN = re.compile(r"layer(\d+)")
