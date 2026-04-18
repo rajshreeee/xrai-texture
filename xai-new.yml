@@ -33,3 +33,8 @@ dependencies:
       - gradio
       - wandb
       - kaleido
+      - pydicom
+      - pylibjpeg
+      - pylibjpeg-libjpeg
+      - pylibjpeg-openjpeg
+      - gdcm

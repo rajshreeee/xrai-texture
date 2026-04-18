@@ -306,7 +306,7 @@ def plot_mean_curves(metrics: dict, metric_label: str, early_only: bool = True):
     ep_str    = f"Epochs 1-{max_ep}"
     fig.suptitle(
         f"{metric_label} — Mean +/- Std  "
-        f"({'ECS window highlighted, ' + ep_str if early_only else ep_str})",
+        f"({ep_str if early_only else ep_str})",
         fontsize=13, fontweight="bold", y=1.02
     )
 
