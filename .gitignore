@@ -37,7 +37,6 @@ ENV/
 # Logs & outputs
 # =====================
 *.log
-logs/
 wandb/
 runs/
 outputs/
