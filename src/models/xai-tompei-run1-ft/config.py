@@ -1,0 +1,5 @@
+PROJECT_NAME = "tompei-kernel-week16-final"
+LOG_DIR = "/ediss_data/ediss2/xai-texture/src/models/xai-tompei-run1-ft/logs"
+CHECKPOINT_DIR = "/ediss_data/ediss2/xai-texture/src/models/xai-tompei-run1-ft/checkpoints"
+SPLIT_PATH = "/ediss_data/ediss2/xai-texture/src/models/xai-tompei-run1-ft/data/split_indices.json"
+DATA_ROOT = "/ediss_data/ediss2/xai-texture/data/TOMPEI"
