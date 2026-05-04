@@ -1,0 +1,5 @@
+PROJECT_NAME   = "mammography-stdunet-run1-ft"
+LOG_DIR        = "/ediss_data/ediss2/xai-texture/src/models/xai-stdunet-run1-ft/logs"
+CHECKPOINT_DIR = "/ediss_data/ediss2/xai-texture/src/models/xai-stdunet-run1-ft/checkpoints"
+SPLIT_PATH     = "/ediss_data/ediss2/xai-texture/src/models/xai-stdunet-run1-ft/data/split_indices.json"
+DATA_ROOT = "/ediss_data/ediss2/xai-texture/data/CBIS_DDSM_Patches_Mass_Context"
