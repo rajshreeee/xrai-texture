@@ -1,0 +1,5 @@
+PROJECT_NAME   = "mammography-shallowunet-tompei-1"
+LOG_DIR        = "/ediss_data/ediss2/xai-texture/src/models/xai-shallowunet-tompei-ft/logs"
+CHECKPOINT_DIR = "/ediss_data/ediss2/xai-texture/src/models/xai-shallowunet-tompei-ft/checkpoints"
+SPLIT_PATH     = "/ediss_data/ediss2/xai-texture/src/models/xai-shallowunet-tompei-ft/data/split_indices.json"
+DATA_ROOT      = "/ediss_data/ediss2/xai-texture/data/TOMPEI"

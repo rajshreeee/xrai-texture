@@ -18,7 +18,7 @@ import cv2
 from logger import setup_logger
 import config
 import random
-from vanilla_unet import VanillaUNet
+from segnet_arch import SegNet
 
 SEEDS = [42]
 
@@ -28,12 +28,10 @@ LR = 1e-5
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 CHECKPOINT_DIR = Path(config.CHECKPOINT_DIR)
 CHECKPOINT_DIR.mkdir(exist_ok=True)
-KERNEL_JITTER_SEED = 42  # top-level constant — document this in your paper
+KERNEL_JITTER_SEED = 42
 
 # Raw 5x5 texture kernels from feature-ranking analysis.
-# Keys are ResNet-style labels — all kernels are injected into the target UNet block.
-# Kaiming scaling is NOT applied here; it is applied dynamically in inject_kernels()
-# based on the actual layer's fan-in, so the same kernels work correctly for enc1, enc2, etc.
+# Kaiming scaling is applied dynamically in inject_kernels() based on the target layer's fan-in.
 all_layer_kernels = {
     "layer3": [
         np.array([[-10, -6, -3, -2, -3],
@@ -70,11 +68,6 @@ all_layer_kernels = {
 
 
 def resize_kernels_bilinear(kernel_dict, target_size=(3, 3)):
-    """
-    Resize 5x5 kernels to target_size via bilinear interpolation, then zero-mean
-    and unit-std normalise. Kaiming scaling is intentionally omitted so that
-    inject_kernels() can apply the correct std for whichever layer is targeted.
-    """
     resized = {}
     for layer_name, kernels in kernel_dict.items():
         out = []
@@ -85,7 +78,7 @@ def resize_kernels_bilinear(kernel_dict, target_size=(3, 3)):
             k_f = k_f - np.mean(k_f)
             s = np.std(k_f)
             if s > 1e-8:
-                k_f = k_f / s          # unit std; Kaiming scale applied at injection time
+                k_f = k_f / s
             out.append(k_f.astype(np.float32))
         resized[layer_name] = out
     return resized
@@ -106,7 +99,7 @@ def set_all_seeds(seed):
 
 def build_model(seed, inject_blocks=None):
     set_all_seeds(seed)
-    model = VanillaUNet(in_channels=3, out_channels=1)
+    model = SegNet(in_channels=3, out_channels=1)
     if inject_blocks is not None:
         for block_name in inject_blocks:
             inject_kernels(model, block_name, KERNELS, KERNEL_JITTER_SEED)
@@ -115,13 +108,11 @@ def build_model(seed, inject_blocks=None):
 
 def inject_kernels(model, block_name, kernels_list, seed, scale_to_kaiming=True):
     """
-    Inject texture kernels into the first Conv2d of a DoubleConv encoder block.
+    Inject texture kernels into the first Conv2d of a SegNet encoder block.
     Each (out_idx, in_idx) slot gets an independently jittered variant:
       - random 90° rotation (0/90/180/270)
       - random sign flip (±1)
-    This prevents identical weights across channels that occurred in run3-ft.
-    scale_to_kaiming rescales kernels to match the He-normal std for the target layer,
-    so enc1 (fan_in=27, std≈0.272) and enc2 (fan_in=576, std≈0.059) are both correct.
+    Kaiming scaling matches He-normal std for the target layer fan-in.
     """
     block = getattr(model, block_name)       # e.g. model.enc1
     conv_weight = block.conv[0].weight       # shape: (C_out, C_in, 3, 3)
@@ -172,11 +163,8 @@ def iou_score(pred, target, threshold=0.5, eps=1e-6):
     union = pred.sum(dim=(2,3)) + target.sum(dim=(2,3)) - intersection
     return ((intersection + eps) / (union + eps)).mean()
 
+
 def tversky_loss(pred, target, alpha=0.3, beta=0.7, eps=1e-6):
-    """
-    alpha: weight on False Negatives
-    beta:  weight on False Positives (set high to punish blob predictions)
-    """
     pred_sig = torch.sigmoid(pred)
     tp = (pred_sig * target).sum(dim=(2, 3))
     fp = (pred_sig * (1 - target)).sum(dim=(2, 3))
@@ -184,23 +172,33 @@ def tversky_loss(pred, target, alpha=0.3, beta=0.7, eps=1e-6):
     tversky = (tp + eps) / (tp + alpha * fn + beta * fp + eps)
     return (1 - tversky).mean()
 
+
 def combined_loss(pred, target, bce_weight=0.3):
     bce = nn.BCEWithLogitsLoss()(pred, target)
     tv  = tversky_loss(pred, target, alpha=0.3, beta=0.7)
     return bce_weight * bce + (1 - bce_weight) * tv
 
-# def combined_loss(pred, target, bce_weight=0.5):
-#     bce = nn.BCEWithLogitsLoss()(pred, target)
-#     pred_sig = torch.sigmoid(pred)
-#     intersection = (pred_sig * target).sum(dim=(2,3))
-#     dice = 1 - ((2*intersection + 1) / (pred_sig.sum(dim=(2,3)) + target.sum(dim=(2,3)) + 1)).mean()
-#     return bce_weight * bce + (1 - bce_weight) * dice
 
-
-def train_one_run(group_name, seed, inject_blocks, train_loader, val_loader, test_loader, freeze_epochs=0):
+def train_one_run(group_name, seed, inject_blocks, train_loader, val_loader, test_loader,
+                  freeze_epochs=0, diff_lr=False):
     set_all_seeds(seed)
     model = build_model(seed, inject_blocks)
-    optimizer = torch.optim.Adam(model.parameters(), lr=LR, weight_decay=1e-4)
+
+    # Build optimizer — optionally with a lower LR for the injected encoder block.
+    # diff_lr keeps injected conv[0] at LR/10 after unfreezing (F2 condition).
+    if diff_lr and inject_blocks is not None:
+        injected_params = []
+        for block_name in inject_blocks:
+            injected_params += list(getattr(model, block_name).conv[0].parameters())
+        injected_ids = {id(p) for p in injected_params}
+        other_params = [p for p in model.parameters() if id(p) not in injected_ids]
+        optimizer = torch.optim.Adam([
+            {'params': other_params},
+            {'params': injected_params, 'lr': LR / 10},
+        ], lr=LR, weight_decay=1e-4)
+    else:
+        optimizer = torch.optim.Adam(model.parameters(), lr=LR, weight_decay=1e-4)
+
     scheduler = CosineAnnealingLR(optimizer, T_max=EPOCHS, eta_min=1e-7)
 
     if inject_blocks is not None and freeze_epochs > 0:
@@ -209,7 +207,7 @@ def train_one_run(group_name, seed, inject_blocks, train_loader, val_loader, tes
                 p.requires_grad = False
 
     logger = setup_logger(group_name, seed)
-    logger.info(f"Starting | group={group_name} | seed={seed} | inject_blocks={inject_blocks} | freeze_epochs={freeze_epochs} | device={DEVICE}")
+    logger.info(f"Starting | group={group_name} | seed={seed} | inject_blocks={inject_blocks} | freeze_epochs={freeze_epochs} | diff_lr={diff_lr} | device={DEVICE}")
     logger.info(f"Epochs={EPOCHS} | LR={LR} | BatchSize={BATCH_SIZE}")
     logger.info("-" * 70)
 
@@ -220,13 +218,13 @@ def train_one_run(group_name, seed, inject_blocks, train_loader, val_loader, tes
         config={
             "group":         group_name,
             "seed":          seed,
-            "inject_blocks":  inject_blocks if inject_blocks is not None else [],
+            "inject_blocks": inject_blocks if inject_blocks is not None else [],
             "freeze_epochs": freeze_epochs,
             "epochs":        EPOCHS,
             "lr":            LR,
             "batch_size":    BATCH_SIZE,
-            "model":         "VanillaUNet",
-            "dataset":       "CBIS_DDSM_augmented",
+            "model":         "SegNet",
+            "dataset":       "TOMPEI_augmented",
         },
         reinit=True
     )
@@ -244,6 +242,11 @@ def train_one_run(group_name, seed, inject_blocks, train_loader, val_loader, tes
 
         # --- Train ---
         model.train()
+        if inject_blocks is not None and freeze_epochs > 0 and epoch <= freeze_epochs:
+            for block_name in inject_blocks:
+                bn = getattr(model, block_name).conv[1]  # BN directly after conv[0]
+                if isinstance(bn, nn.BatchNorm2d):
+                    bn.eval()
         train_loss, train_dice, train_iou = 0.0, 0.0, 0.0
         for images, masks in train_loader:
             images, masks = images.to(DEVICE), masks.to(DEVICE)
@@ -278,7 +281,7 @@ def train_one_run(group_name, seed, inject_blocks, train_loader, val_loader, tes
 
         scheduler.step()
 
-        # --- Test (observation only — no model selection from these numbers) ---
+        # --- Test (observation only — not used for model selection) ---
         model.eval()
         test_loss, test_dice, test_iou = 0.0, 0.0, 0.0
         with torch.no_grad():
@@ -337,21 +340,16 @@ def train_one_run(group_name, seed, inject_blocks, train_loader, val_loader, tes
 
 
 def main():
+    # (group_name, inject_blocks, freeze_epochs, diff_lr)
     conditions = [
-        # ("B2_enc2_init",       ["enc2"],         0),
-        # ("C2_enc2_freeze5",    ["enc2"],         5),
-        # ("D_enc2_freeze10",   ["enc2"],        10),
-        # ("E_enc1_init",       ["enc1"],         0),
-        # ("F_enc1_freeze5",    ["enc1"],         5),
-        # ("G_enc1_freeze10",   ["enc1"],        10),
-        ("H_enc1enc2_init",   ["enc1", "enc2"], 0),
-        ("I_enc1enc2_freeze5",["enc1", "enc2"], 5),
-        # ("J_enc1enc2_freeze5",["enc1", "enc2"], 10),
+        ("A2_baseline",              None,     0, False),
+        ("F2_enc1_freeze5",         ["enc1"], 5, False),
+        # ("F2_enc1_freeze5_difflr", ["enc1"], 5, True),
     ]
 
     all_results = []
 
-    for group_name, inject_block, freeze_epochs in conditions:
+    for group_name, inject_block, freeze_epochs, diff_lr in conditions:
         print(f"\n{'='*50}")
         print(f"Running group: {group_name}")
         for seed in SEEDS:
@@ -359,15 +357,15 @@ def main():
             train_loader, val_loader, test_loader = make_loaders(seed, BATCH_SIZE)
             result = train_one_run(group_name, seed, inject_block,
                                    train_loader, val_loader, test_loader,
-                                   freeze_epochs=freeze_epochs)
+                                   freeze_epochs=freeze_epochs, diff_lr=diff_lr)
             all_results.append(result)
 
     import pandas as pd
     df = pd.DataFrame(all_results)
     summary = df.groupby("group").agg(["mean", "std"]).round(4)
-    print("\n=== Run1 Summary ===")
+    print("\n=== SegNet Run Summary ===")
     print(summary)
-    summary.to_csv("phase1_results.csv")
+    summary.to_csv("segnet_results.csv")
 
 
 if __name__ == "__main__":

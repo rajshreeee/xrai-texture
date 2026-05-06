@@ -1,0 +1,5 @@
+,seed,seed,best_val_dice,best_val_dice,best_epoch,best_epoch,dice_val_epoch5,dice_val_epoch5,dice_val_epoch10,dice_val_epoch10,dice_val_epoch15,dice_val_epoch15,dice_val_epoch20,dice_val_epoch20,dice_val_epoch25,dice_val_epoch25,dice_val_epoch30,dice_val_epoch30,dice_val_epoch35,dice_val_epoch35,dice_val_epoch40,dice_val_epoch40,dice_val_epoch45,dice_val_epoch45,dice_val_epoch50,dice_val_epoch50
+,mean,std,mean,std,mean,std,mean,std,mean,std,mean,std,mean,std,mean,std,mean,std,mean,std,mean,std,mean,std,mean,std
+group,,,,,,,,,,,,,,,,,,,,,,,,,,
+E_enc1_init,42.0,,0.8241,,38.0,,0.7743,,0.7966,,0.813,,0.8188,,0.8175,,0.8181,,0.8205,,0.8236,,0.8228,,0.8241,
+H_enc1enc2_init,42.0,,0.8264,,49.0,,0.7679,,0.7793,,0.8018,,0.8168,,0.8104,,0.8192,,0.8238,,0.825,,0.825,,0.8243,

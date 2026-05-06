@@ -1,0 +1,5 @@
+PROJECT_NAME   = "mammography-stdunet-tompei-run2-new"
+LOG_DIR        = "/ediss_data/ediss2/xai-texture/src/models/xai-stdunet-tompei-run2-ft/logs"
+CHECKPOINT_DIR = "/ediss_data/ediss2/xai-texture/src/models/xai-stdunet-tompei-run2-ft/checkpoints"
+SPLIT_PATH     = "/ediss_data/ediss2/xai-texture/src/models/xai-stdunet-tompei-run2-ft/data/split_indices.json"
+DATA_ROOT      = "/ediss_data/ediss2/xai-texture/data/TOMPEI"

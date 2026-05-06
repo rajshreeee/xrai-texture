@@ -22,13 +22,13 @@ from vanilla_unet import VanillaUNet
 
 SEEDS = [42]
 
-EPOCHS = 50
+EPOCHS = 30
 BATCH_SIZE = 8
 LR = 1e-5
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 CHECKPOINT_DIR = Path(config.CHECKPOINT_DIR)
 CHECKPOINT_DIR.mkdir(exist_ok=True)
-KERNEL_JITTER_SEED = 42  # top-level constant — document this in your paper
+KERNEL_JITTER_SEED = 123  # top-level constant — document this in your paper
 
 # Raw 5x5 texture kernels from feature-ranking analysis.
 # Keys are ResNet-style labels — all kernels are injected into the target UNet block.
@@ -173,10 +173,6 @@ def iou_score(pred, target, threshold=0.5, eps=1e-6):
     return ((intersection + eps) / (union + eps)).mean()
 
 def tversky_loss(pred, target, alpha=0.3, beta=0.7, eps=1e-6):
-    """
-    alpha: weight on False Negatives
-    beta:  weight on False Positives (set high to punish blob predictions)
-    """
     pred_sig = torch.sigmoid(pred)
     tp = (pred_sig * target).sum(dim=(2, 3))
     fp = (pred_sig * (1 - target)).sum(dim=(2, 3))
@@ -189,27 +185,15 @@ def combined_loss(pred, target, bce_weight=0.3):
     tv  = tversky_loss(pred, target, alpha=0.3, beta=0.7)
     return bce_weight * bce + (1 - bce_weight) * tv
 
-# def combined_loss(pred, target, bce_weight=0.5):
-#     bce = nn.BCEWithLogitsLoss()(pred, target)
-#     pred_sig = torch.sigmoid(pred)
-#     intersection = (pred_sig * target).sum(dim=(2,3))
-#     dice = 1 - ((2*intersection + 1) / (pred_sig.sum(dim=(2,3)) + target.sum(dim=(2,3)) + 1)).mean()
-#     return bce_weight * bce + (1 - bce_weight) * dice
 
-
-def train_one_run(group_name, seed, inject_blocks, train_loader, val_loader, test_loader, freeze_epochs=0):
+def train_one_run(group_name, seed, inject_blocks, train_loader, val_loader, test_loader):
     set_all_seeds(seed)
     model = build_model(seed, inject_blocks)
     optimizer = torch.optim.Adam(model.parameters(), lr=LR, weight_decay=1e-4)
     scheduler = CosineAnnealingLR(optimizer, T_max=EPOCHS, eta_min=1e-7)
 
-    if inject_blocks is not None and freeze_epochs > 0:
-        for block_name in inject_blocks:
-            for p in getattr(model, block_name).conv[0].parameters():
-                p.requires_grad = False
-
     logger = setup_logger(group_name, seed)
-    logger.info(f"Starting | group={group_name} | seed={seed} | inject_blocks={inject_blocks} | freeze_epochs={freeze_epochs} | device={DEVICE}")
+    logger.info(f"Starting | group={group_name} | seed={seed} | inject_blocks={inject_blocks} | device={DEVICE}")
     logger.info(f"Epochs={EPOCHS} | LR={LR} | BatchSize={BATCH_SIZE}")
     logger.info("-" * 70)
 
@@ -220,13 +204,13 @@ def train_one_run(group_name, seed, inject_blocks, train_loader, val_loader, tes
         config={
             "group":         group_name,
             "seed":          seed,
-            "inject_blocks":  inject_blocks if inject_blocks is not None else [],
-            "freeze_epochs": freeze_epochs,
+            "inject_blocks": inject_blocks if inject_blocks is not None else [],
+            "freeze_epochs": 0,
             "epochs":        EPOCHS,
             "lr":            LR,
             "batch_size":    BATCH_SIZE,
             "model":         "VanillaUNet",
-            "dataset":       "CBIS_DDSM_augmented",
+            "dataset":       "TOMPEI",
         },
         reinit=True
     )
@@ -236,12 +220,6 @@ def train_one_run(group_name, seed, inject_blocks, train_loader, val_loader, tes
     early_dice    = {}
 
     for epoch in range(1, EPOCHS + 1):
-        if inject_blocks is not None and freeze_epochs > 0 and epoch == freeze_epochs + 1:
-            for block_name in inject_blocks:
-                for p in getattr(model, block_name).conv[0].parameters():
-                    p.requires_grad = True
-            logger.info(f"Unfreezing {inject_blocks} conv[0] at epoch {epoch}")
-
         # --- Train ---
         model.train()
         train_loss, train_dice, train_iou = 0.0, 0.0, 0.0
@@ -338,36 +316,31 @@ def train_one_run(group_name, seed, inject_blocks, train_loader, val_loader, tes
 
 def main():
     conditions = [
-        # ("B2_enc2_init",       ["enc2"],         0),
-        # ("C2_enc2_freeze5",    ["enc2"],         5),
-        # ("D_enc2_freeze10",   ["enc2"],        10),
-        # ("E_enc1_init",       ["enc1"],         0),
-        # ("F_enc1_freeze5",    ["enc1"],         5),
-        # ("G_enc1_freeze10",   ["enc1"],        10),
-        ("H_enc1enc2_init",   ["enc1", "enc2"], 0),
-        ("I_enc1enc2_freeze5",["enc1", "enc2"], 5),
-        # ("J_enc1enc2_freeze5",["enc1", "enc2"], 10),
+        # ("A3_baseline",        None,              0),
+        ("E3_enc1_init",      ["enc1"],           0),
+        ("B3_enc2_init",      ["enc2"],           0),
+
+        # ("H_enc1enc2_init",  ["enc1", "enc2"],   0),
     ]
 
     all_results = []
 
-    for group_name, inject_block, freeze_epochs in conditions:
+    for group_name, inject_blocks, _ in conditions:
         print(f"\n{'='*50}")
         print(f"Running group: {group_name}")
         for seed in SEEDS:
             print(f"  Seed: {seed}")
             train_loader, val_loader, test_loader = make_loaders(seed, BATCH_SIZE)
-            result = train_one_run(group_name, seed, inject_block,
-                                   train_loader, val_loader, test_loader,
-                                   freeze_epochs=freeze_epochs)
+            result = train_one_run(group_name, seed, inject_blocks,
+                                   train_loader, val_loader, test_loader)
             all_results.append(result)
 
     import pandas as pd
     df = pd.DataFrame(all_results)
     summary = df.groupby("group").agg(["mean", "std"]).round(4)
-    print("\n=== Run1 Summary ===")
+    print("\n=== Run2 Summary ===")
     print(summary)
-    summary.to_csv("phase1_results.csv")
+    summary.to_csv("tompei_run2_results.csv")
 
 
 if __name__ == "__main__":

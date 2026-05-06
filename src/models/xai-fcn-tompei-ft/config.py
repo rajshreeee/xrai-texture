@@ -1,0 +1,5 @@
+PROJECT_NAME   = "mammography-fcn-tompei-1"
+LOG_DIR        = "/ediss_data/ediss2/xai-texture/src/models/xai-fcn-tompei-ft/logs"
+CHECKPOINT_DIR = "/ediss_data/ediss2/xai-texture/src/models/xai-fcn-tompei-ft/checkpoints"
+SPLIT_PATH     = "/ediss_data/ediss2/xai-texture/src/models/xai-fcn-tompei-ft/data/split_indices.json"
+DATA_ROOT      = "/ediss_data/ediss2/xai-texture/data/TOMPEI"
