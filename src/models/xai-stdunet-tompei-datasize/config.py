@@ -1,0 +1,5 @@
+PROJECT_NAME   = "tompei-vanillaunet"
+LOG_DIR        = "/ediss_data/ediss2/xai-texture/src/models/xai-stdunet-tompei-datasize/logs"
+CHECKPOINT_DIR = "/ediss_data/ediss2/xai-texture/src/models/xai-stdunet-tompei-datasize/checkpoints"
+SPLIT_PATH     = "/ediss_data/ediss2/xai-texture/src/models/xai-stdunet-tompei-datasize/data/split_indices.json"
+DATA_ROOT      = "/ediss_data/ediss2/xai-texture/data/TOMPEI"

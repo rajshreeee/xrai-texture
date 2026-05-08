@@ -22,10 +22,8 @@ class JointTransform:
         image = F.resize(image, self.size, interpolation=F.InterpolationMode.BILINEAR)
         mask  = F.resize(mask,  self.size, interpolation=F.InterpolationMode.NEAREST)
 
-        # In JointTransform, after rotation, before returning:
         if self.augment:
-            max_shift = int(0.1 * self.size[0])
-            # Use generator for all random ops — keeps full reproducibility
+            max_shift = int(0.10 * self.size[0])
             tx = torch.randint(-max_shift, max_shift + 1, (1,),
                             generator=self.generator).item()
             ty = torch.randint(-max_shift, max_shift + 1, (1,),
@@ -34,21 +32,13 @@ class JointTransform:
                             interpolation=F.InterpolationMode.BILINEAR, fill=0)
             mask  = F.affine(mask,  angle=0, translate=[tx, ty], scale=1.0, shear=0,
                             interpolation=F.InterpolationMode.NEAREST,  fill=0)
-            # Horizontal flip
             if torch.rand(1, generator=self.generator).item() > 0.5:
                 image = F.hflip(image)
                 mask  = F.hflip(mask)
 
-            # Vertical flip
             if torch.rand(1, generator=self.generator).item() > 0.5:
                 image = F.vflip(image)
                 mask  = F.vflip(mask)
-
-            # Rotation commented out — adding it narrowed the train/val gap in run3-ft
-            # if torch.rand(1, generator=self.generator).item() > 0.5:
-            #     angle = (torch.rand(1, generator=self.generator).item() * 30) - 15
-            #     image = F.rotate(image, angle, fill=0)
-            #     mask  = F.rotate(mask,  angle, fill=0)
 
         return image, mask
 
@@ -114,52 +104,40 @@ class TransformSubset(Dataset):
 
 # Grayscale-aware: mammograms have R=G=B, so identical per-channel values
 # prevent artificial colour gradients that would corrupt texture kernel responses.
-# Values are the channel-wise average of standard ImageNet stats.
 image_normalization = transforms.Normalize(
     mean=[0.449, 0.449, 0.449],
     std=[0.226, 0.226, 0.226]
 )
 
 def save_fixed_split(dataset, val_ratio=0.2, seed=42):
-    """Split at the PATIENT level to prevent data leakage (TOMPEI specific)."""
+    """Split at original-image level so _aug* copies never cross the train/val boundary."""
+    import re
     rng = np.random.default_rng(seed)
 
-    # 1. Extract unique patient IDs from images
-    # Example format: "D1-1433_R_Malignant.png" -> Patient ID: "D1-1433"
-    patient_ids = set()
-    for name in dataset.images:
-        pat_id = name.split('_')[0]
-        patient_ids.add(pat_id)
-            
-    patient_ids = np.array(list(patient_ids))
-    rng.shuffle(patient_ids)
+    originals = np.array([name for name in dataset.images if not re.search(r'_aug\d+', name)])
+    rng.shuffle(originals)
+    split_idx = int(len(originals) * (1 - val_ratio))
+    train_orig = set(originals[:split_idx])
+    val_orig   = set(originals[split_idx:])
 
-    # 2. Split at the PATIENT level
-    split_idx = int(len(patient_ids) * (1 - val_ratio))
-    train_patients = set(patient_ids[:split_idx])
-    val_patients   = set(patient_ids[split_idx:])
-
-    # 3. Map patients back to image indices
     train_indices, val_indices = [], []
     for idx, name in enumerate(dataset.images):
-        pat_id = name.split('_')[0]
-
-        if pat_id in val_patients:
+        base = re.sub(r'_aug\d+', '', os.path.splitext(name)[0]) + os.path.splitext(name)[1]
+        if name in val_orig or base in val_orig:
             val_indices.append(idx)
         else:
             train_indices.append(idx)
-
     os.makedirs(os.path.dirname(SPLIT_PATH), exist_ok=True)
     with open(SPLIT_PATH, "w") as f:
         json.dump({"train": train_indices, "val": val_indices}, f)
-    print(f"patient-level split saved: {len(train_indices)} train / {len(val_indices)} val")
+    print(f"Fixed split saved: {len(train_indices)} train / {len(val_indices)} val")
 
 def load_fixed_split():
     with open(SPLIT_PATH) as f:
         return json.load(f)
 
 
-def make_loaders(seed, batch_size=8):
+def make_loaders(seed, batch_size=8, train_fraction=1.0):
     root = config.DATA_ROOT
 
     aug_generator     = torch.Generator().manual_seed(seed)
@@ -180,8 +158,15 @@ def make_loaders(seed, batch_size=8):
         save_fixed_split(full_train_dataset)
     split = load_fixed_split()
 
-    train_set = TransformSubset(full_train_dataset, split["train"], joint_transform=train_joint_transform)
-    val_set   = TransformSubset(full_train_dataset, split["val"],   joint_transform=val_joint_transform)
+    if train_fraction < 1.0:
+        rng = np.random.default_rng(seed)
+        n_keep = max(1, int(len(split["train"]) * train_fraction))
+        kept = rng.choice(split["train"], size=n_keep, replace=False).tolist()
+    else:
+        kept = split["train"]
+
+    train_set = TransformSubset(full_train_dataset, kept,             joint_transform=train_joint_transform)
+    val_set   = TransformSubset(full_train_dataset, split["val"],     joint_transform=val_joint_transform)
 
     test_dataset = CancerDataset(test_images_dir, test_masks_dir)
     test_set     = TransformSubset(test_dataset, list(range(len(test_dataset))),

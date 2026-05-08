@@ -1,0 +1,5 @@
+PROJECT_NAME = "tompei-kernel-new"
+LOG_DIR = "/ediss_data/ediss2/xai-texture/src/models/xai-tompei-run1-ft-new/logs"
+CHECKPOINT_DIR = "/ediss_data/ediss2/xai-texture/src/models/xai-tompei-run1-ft-new/checkpoints"
+SPLIT_PATH = "/ediss_data/ediss2/xai-texture/src/models/xai-tompei-run1-ft-new/data/split_indices.json"
+DATA_ROOT = "/ediss_data/ediss2/xai-texture/data/TOMPEI"

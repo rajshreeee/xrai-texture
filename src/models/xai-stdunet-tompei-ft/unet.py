@@ -338,12 +338,15 @@ def train_one_run(group_name, seed, inject_blocks, train_loader, val_loader, tes
 
 def main():
     conditions = [
-        ("A_baseline", None, 0),
+        ("A_high_lr_baseline", None, 0),
         # ("B2_enc2_init",       ["enc2"],         0),
         # ("C2_enc2_freeze5",    ["enc2"],         5),
         # ("D_enc2_freeze10",   ["enc2"],        10),
         # ("E_enc1_init",       ["enc1"],         0),
-        ("F_enc1_freeze5",    ["enc1"],         5),
+        # ("F_identical_enc1_freeze5",    ["enc1"],         5),
+        # ("F_identical_enc1",    ["enc1"],         0),
+        ("B_high_lr",    ["enc1"],         5),
+
         # ("G_enc1_freeze10",   ["enc1"],        10),
         # ("H_enc1enc2_init",   ["enc1", "enc2"], 0),
         # ("I_enc1enc2_freeze5",["enc1", "enc2"], 5),

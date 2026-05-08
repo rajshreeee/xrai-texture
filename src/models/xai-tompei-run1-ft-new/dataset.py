@@ -22,41 +22,37 @@ class JointTransform:
         image = F.resize(image, self.size, interpolation=F.InterpolationMode.BILINEAR)
         mask  = F.resize(mask,  self.size, interpolation=F.InterpolationMode.NEAREST)
 
-        # In JointTransform, after rotation, before returning:
         if self.augment:
-            max_shift = int(0.1 * self.size[0])
-            # Use generator for all random ops — keeps full reproducibility
-            tx = torch.randint(-max_shift, max_shift + 1, (1,),
-                            generator=self.generator).item()
-            ty = torch.randint(-max_shift, max_shift + 1, (1,),
-                            generator=self.generator).item()
-            image = F.affine(image, angle=0, translate=[tx, ty], scale=1.0, shear=0,
-                            interpolation=F.InterpolationMode.BILINEAR, fill=0)
-            mask  = F.affine(mask,  angle=0, translate=[tx, ty], scale=1.0, shear=0,
-                            interpolation=F.InterpolationMode.NEAREST,  fill=0)
+            # # Random translation ±10% of image size
+            # max_shift = int(0.10 * self.size[0])
+            # tx = torch.randint(-max_shift, max_shift + 1, (1,), generator=self.generator).item()
+            # ty = torch.randint(-max_shift, max_shift + 1, (1,), generator=self.generator).item()
+            # image = F.affine(image, angle=0, translate=[tx, ty], scale=1.0, shear=0,
+            #                  interpolation=F.InterpolationMode.BILINEAR, fill=0)
+            # mask  = F.affine(mask,  angle=0, translate=[tx, ty], scale=1.0, shear=0,
+            #                  interpolation=F.InterpolationMode.NEAREST,  fill=0)
+
             # Horizontal flip
             if torch.rand(1, generator=self.generator).item() > 0.5:
                 image = F.hflip(image)
-                mask  = F.hflip(mask)
+                mask = F.hflip(mask)
 
             # Vertical flip
             if torch.rand(1, generator=self.generator).item() > 0.5:
                 image = F.vflip(image)
-                mask  = F.vflip(mask)
-
-            # Rotation commented out — adding it narrowed the train/val gap in run3-ft
-            # if torch.rand(1, generator=self.generator).item() > 0.5:
-            #     angle = (torch.rand(1, generator=self.generator).item() * 30) - 15
-            #     image = F.rotate(image, angle, fill=0)
-            #     mask  = F.rotate(mask,  angle, fill=0)
+                mask = F.vflip(mask)
 
         return image, mask
 
 
 class CancerDataset(Dataset):
-    def __init__(self, images_dir, masks_dir):
-        self.images_dir = images_dir
-        self.masks_dir  = masks_dir
+    # ✏️ CHANGED: added mask_suffix parameter (default ".png" matches HAM10000 naming)
+    # For CBIS-DDSM: mask_suffix=".png"  (same as before — no breakage)
+    # For HAM10000:  mask_suffix=".png"  (images and masks share the same filename)
+    def __init__(self, images_dir, masks_dir, mask_suffix=".png"):
+        self.images_dir  = images_dir
+        self.masks_dir   = masks_dir
+        self.mask_suffix = mask_suffix
 
         valid_ext = (".jpg", ".jpeg", ".png")
         self.images = sorted([
@@ -70,8 +66,9 @@ class CancerDataset(Dataset):
     def __getitem__(self, idx):
         image_name = self.images[idx]
         image_path = os.path.join(self.images_dir, image_name)
+        # ✏️ CHANGED: use self.mask_suffix instead of hardcoded ".png"
         mask_path  = os.path.join(self.masks_dir,
-                                  os.path.splitext(image_name)[0] + ".png")
+                                  os.path.splitext(image_name)[0] + self.mask_suffix)
 
         image = cv2.imread(image_path)
         if image is None:
@@ -100,59 +97,38 @@ class TransformSubset(Dataset):
         return len(self.indices)
 
     def __getitem__(self, idx):
-        image, mask = self.dataset[self.indices[idx]]  # PIL, PIL
+        image, mask = self.dataset[self.indices[idx]]
 
         if self.joint_transform:
-            image, mask = self.joint_transform(image, mask)  # PIL → PIL
+            image, mask = self.joint_transform(image, mask)
 
-        image = transforms.ToTensor()(image)   # [3, H, W] float32 in [0, 1]
-        mask  = transforms.ToTensor()(mask)    # [1, H, W] float32 in [0, 1]
+        image = transforms.ToTensor()(image)
+        mask  = transforms.ToTensor()(mask)
         image = image_normalization(image)
 
         return image, mask
 
 
-# Grayscale-aware: mammograms have R=G=B, so identical per-channel values
-# prevent artificial colour gradients that would corrupt texture kernel responses.
-# Values are the channel-wise average of standard ImageNet stats.
 image_normalization = transforms.Normalize(
     mean=[0.449, 0.449, 0.449],
     std=[0.226, 0.226, 0.226]
 )
 
-def save_fixed_split(dataset, val_ratio=0.2, seed=42):
-    """Split at the PATIENT level to prevent data leakage (TOMPEI specific)."""
+
+def save_fixed_split(dataset, val_ratio=0.125, seed=42):
+    """Run ONCE to generate split_indices.json. Never regenerate mid-experiment."""
     rng = np.random.default_rng(seed)
+    indices = np.arange(len(dataset))
+    rng.shuffle(indices)
+    split = int(len(dataset) * (1 - val_ratio))
 
-    # 1. Extract unique patient IDs from images
-    # Example format: "D1-1433_R_Malignant.png" -> Patient ID: "D1-1433"
-    patient_ids = set()
-    for name in dataset.images:
-        pat_id = name.split('_')[0]
-        patient_ids.add(pat_id)
-            
-    patient_ids = np.array(list(patient_ids))
-    rng.shuffle(patient_ids)
-
-    # 2. Split at the PATIENT level
-    split_idx = int(len(patient_ids) * (1 - val_ratio))
-    train_patients = set(patient_ids[:split_idx])
-    val_patients   = set(patient_ids[split_idx:])
-
-    # 3. Map patients back to image indices
-    train_indices, val_indices = [], []
-    for idx, name in enumerate(dataset.images):
-        pat_id = name.split('_')[0]
-
-        if pat_id in val_patients:
-            val_indices.append(idx)
-        else:
-            train_indices.append(idx)
-
-    os.makedirs(os.path.dirname(SPLIT_PATH), exist_ok=True)
     with open(SPLIT_PATH, "w") as f:
-        json.dump({"train": train_indices, "val": val_indices}, f)
-    print(f"patient-level split saved: {len(train_indices)} train / {len(val_indices)} val")
+        json.dump({
+            "train": indices[:split].tolist(),
+            "val":   indices[split:].tolist()
+        }, f)
+    print(f"Fixed split saved: {split} train / {len(dataset)-split} val")
+
 
 def load_fixed_split():
     with open(SPLIT_PATH) as f:
@@ -160,6 +136,7 @@ def load_fixed_split():
 
 
 def make_loaders(seed, batch_size=8):
+    # ✏️ CHANGED: root now points to HAM10000 directory
     root = config.DATA_ROOT
 
     aug_generator     = torch.Generator().manual_seed(seed)
@@ -174,7 +151,8 @@ def make_loaders(seed, batch_size=8):
     test_images_dir  = os.path.join(root, 'test/images')
     test_masks_dir   = os.path.join(root, 'test/masks')
 
-    full_train_dataset = CancerDataset(train_images_dir, train_masks_dir)
+    # ✏️ CHANGED: mask_suffix=".png" — HAM10000 masks share the same stem as images
+    full_train_dataset = CancerDataset(train_images_dir, train_masks_dir, mask_suffix=".png")
 
     if not Path(SPLIT_PATH).exists():
         save_fixed_split(full_train_dataset)
@@ -183,7 +161,7 @@ def make_loaders(seed, batch_size=8):
     train_set = TransformSubset(full_train_dataset, split["train"], joint_transform=train_joint_transform)
     val_set   = TransformSubset(full_train_dataset, split["val"],   joint_transform=val_joint_transform)
 
-    test_dataset = CancerDataset(test_images_dir, test_masks_dir)
+    test_dataset = CancerDataset(test_images_dir, test_masks_dir, mask_suffix=".png")
     test_set     = TransformSubset(test_dataset, list(range(len(test_dataset))),
                                    joint_transform=test_joint_transform)
 

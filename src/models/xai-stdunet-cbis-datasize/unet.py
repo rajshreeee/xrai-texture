@@ -21,20 +21,19 @@ import random
 from vanilla_unet import VanillaUNet
 
 SEEDS = [42]
+FRACTIONS = [0.10, 0.25, 0.50, 0.75, 1.0]
 
-EPOCHS = 25
-SCHEDULE_EPOCHS = 50
+MAX_EPOCHS          = 100
+EARLY_STOP_PATIENCE = 10
+MIN_DELTA           = 0.001  # minimum val_dice improvement to count as progress
+T_MAX               = 100    # CosineAnnealingLR period
 BATCH_SIZE = 8
 LR = 1e-5
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 CHECKPOINT_DIR = Path(config.CHECKPOINT_DIR)
 CHECKPOINT_DIR.mkdir(exist_ok=True)
-KERNEL_JITTER_SEED = 42  # top-level constant — document this in your paper
+KERNEL_JITTER_SEED = 42
 
-# Raw 5x5 texture kernels from feature-ranking analysis.
-# Keys are ResNet-style labels — all kernels are injected into the target UNet block.
-# Kaiming scaling is NOT applied here; it is applied dynamically in inject_kernels()
-# based on the actual layer's fan-in, so the same kernels work correctly for enc1, enc2, etc.
 all_layer_kernels = {
     "layer3": [
         np.array([[-10, -6, -3, -2, -3],
@@ -71,11 +70,6 @@ all_layer_kernels = {
 
 
 def resize_kernels_bilinear(kernel_dict, target_size=(3, 3)):
-    """
-    Resize 5x5 kernels to target_size via bilinear interpolation, then zero-mean
-    and unit-std normalise. Kaiming scaling is intentionally omitted so that
-    inject_kernels() can apply the correct std for whichever layer is targeted.
-    """
     resized = {}
     for layer_name, kernels in kernel_dict.items():
         out = []
@@ -86,7 +80,7 @@ def resize_kernels_bilinear(kernel_dict, target_size=(3, 3)):
             k_f = k_f - np.mean(k_f)
             s = np.std(k_f)
             if s > 1e-8:
-                k_f = k_f / s          # unit std; Kaiming scale applied at injection time
+                k_f = k_f / s
             out.append(k_f.astype(np.float32))
         resized[layer_name] = out
     return resized
@@ -115,17 +109,8 @@ def build_model(seed, inject_blocks=None):
 
 
 def inject_kernels(model, block_name, kernels_list, seed, scale_to_kaiming=True):
-    """
-    Inject texture kernels into the first Conv2d of a DoubleConv encoder block.
-    Each (out_idx, in_idx) slot gets an independently jittered variant:
-      - random 90° rotation (0/90/180/270)
-      - random sign flip (±1)
-    This prevents identical weights across channels that occurred in run3-ft.
-    scale_to_kaiming rescales kernels to match the He-normal std for the target layer,
-    so enc1 (fan_in=27, std≈0.272) and enc2 (fan_in=576, std≈0.059) are both correct.
-    """
-    block = getattr(model, block_name)       # e.g. model.enc1
-    conv_weight = block.conv[0].weight       # shape: (C_out, C_in, 3, 3)
+    block = getattr(model, block_name)
+    conv_weight = block.conv[0].weight  # shape: (C_out, C_in, 3, 3)
 
     n_out = conv_weight.shape[0]
     n_in  = conv_weight.shape[1]
@@ -187,40 +172,66 @@ def combined_loss(pred, target, bce_weight=0.3):
     return bce_weight * bce + (1 - bce_weight) * tv
 
 
-def train_one_run(group_name, seed, inject_blocks, train_loader, val_loader, test_loader):
+def train_one_run(group_name, seed, inject_blocks, train_loader, val_loader, test_loader,
+                  freeze_epochs=0, train_fraction=1.0,
+                  max_epochs=MAX_EPOCHS, t_max=T_MAX,
+                  patience=EARLY_STOP_PATIENCE, min_delta=MIN_DELTA):
     set_all_seeds(seed)
     model = build_model(seed, inject_blocks)
     optimizer = torch.optim.Adam(model.parameters(), lr=LR, weight_decay=1e-4)
-    scheduler = CosineAnnealingLR(optimizer, T_max=SCHEDULE_EPOCHS, eta_min=1e-7)
+    scheduler = CosineAnnealingLR(optimizer, T_max=t_max, eta_min=1e-7)
 
-    logger = setup_logger(group_name, seed)
-    logger.info(f"Starting | group={group_name} | seed={seed} | inject_blocks={inject_blocks} | device={DEVICE}")
-    logger.info(f"Epochs={EPOCHS} | LR={LR} | BatchSize={BATCH_SIZE}")
+    if inject_blocks is not None and freeze_epochs > 0:
+        for block_name in inject_blocks:
+            for p in getattr(model, block_name).conv[0].parameters():
+                p.requires_grad = False
+
+    frac_tag = f"frac{int(train_fraction * 100)}"
+    run_name = f"{group_name}_{frac_tag}_seed{seed}"
+    n_train  = len(train_loader.dataset)
+
+    logger = setup_logger(run_name, seed)
+    logger.info(f"Starting | run={run_name} | inject_blocks={inject_blocks} | "
+                f"train_fraction={train_fraction} | n_train={n_train} | device={DEVICE}")
+    logger.info(f"Epochs={max_epochs} | LR={LR} | BatchSize={BATCH_SIZE} | EarlyStopPatience={patience} | MinDelta={min_delta} | T_max={t_max}")
     logger.info("-" * 70)
 
     run = wandb.init(
         entity="rajshreerai931-abo-akademi",
         project=config.PROJECT_NAME,
-        name=f"{group_name}_seed{seed}",
+        name=run_name,
         config={
-            "group":         group_name,
-            "seed":          seed,
-            "inject_blocks": inject_blocks if inject_blocks is not None else [],
-            "freeze_epochs": 0,
-            "epochs":        EPOCHS,
-            "lr":            LR,
-            "batch_size":    BATCH_SIZE,
-            "model":         "VanillaUNet",
-            "dataset":       "TOMPEI",
+            "group":          group_name,
+            "seed":           seed,
+            "inject_blocks":  inject_blocks if inject_blocks is not None else [],
+            "freeze_epochs":  freeze_epochs,
+            "epochs":                max_epochs,
+            "early_stop_patience":   patience,
+            "min_delta":             min_delta,
+            "t_max":                 t_max,
+            "lr":                    LR,
+            "batch_size":     BATCH_SIZE,
+            "train_fraction": train_fraction,
+            "n_train_images": n_train,
+            "model":          "VanillaUNet",
+            "dataset":        "CBIS_DDSM_Patches_Mass_Context",
         },
         reinit=True
     )
 
-    best_val_dice = 0.0
-    best_epoch    = 0
-    early_dice    = {}
+    best_val_dice    = 0.0
+    best_epoch       = 0
+    early_dice       = {}
+    patience_counter = 0
+    stopped_early    = False
 
-    for epoch in range(1, EPOCHS + 1):
+    for epoch in range(1, max_epochs + 1):
+        if inject_blocks is not None and freeze_epochs > 0 and epoch == freeze_epochs + 1:
+            for block_name in inject_blocks:
+                for p in getattr(model, block_name).conv[0].parameters():
+                    p.requires_grad = True
+            logger.info(f"Unfreezing {inject_blocks} conv[0] at epoch {epoch}")
+
         # --- Train ---
         model.train()
         train_loss, train_dice, train_iou = 0.0, 0.0, 0.0
@@ -277,15 +288,21 @@ def train_one_run(group_name, seed, inject_blocks, train_loader, val_loader, tes
             logger.info(f">>> CHECKPOINT ep{epoch} | Val Dice={val_dice:.4f}")
 
         improved = ""
-        if val_dice > best_val_dice:
-            best_val_dice = val_dice
-            best_epoch    = epoch
+        if val_dice >= best_val_dice + min_delta:
+            best_val_dice    = val_dice
+            best_epoch       = epoch
             torch.save(model.state_dict(),
-                       CHECKPOINT_DIR / f"{group_name}_seed{seed}_best.pt")
-            improved = "  ★ best"
+                       CHECKPOINT_DIR / f"{run_name}_best.pt")
+            improved         = "  ★ best"
+            patience_counter = 0
+        else:
+            patience_counter += 1
+            if patience_counter >= patience:
+                logger.info(f"Early stop at epoch {epoch} (no val_dice improvement ≥{min_delta} for {patience} epochs)")
+                stopped_early = True
 
         logger.info(
-            f"Epoch {epoch:03d}/{EPOCHS} | "
+            f"Epoch {epoch:03d}/{max_epochs} | "
             f"train_loss={train_loss:.4f} | train_dice={train_dice:.4f} | train_iou={train_iou:.4f} | "
             f"val_loss={val_loss:.4f}   | val_dice={val_dice:.4f}   | val_iou={val_iou:.4f} | "
             f"test_loss={test_loss:.4f} | test_dice={test_dice:.4f} | test_iou={test_iou:.4f}"
@@ -300,48 +317,69 @@ def train_one_run(group_name, seed, inject_blocks, train_loader, val_loader, tes
             "lr": scheduler.get_last_lr()[0],
         })
 
+        if stopped_early:
+            break
+
     logger.info("-" * 70)
-    logger.info(f"Done | best_val_dice={best_val_dice:.4f} at epoch {best_epoch}")
+    logger.info(f"Done | best_val_dice={best_val_dice:.4f} at epoch {best_epoch} | stopped_early={stopped_early}")
     logger.info(f"Early dice: {early_dice}")
 
     wandb.log(early_dice)
-    wandb.log({"best_val_dice": best_val_dice, "best_epoch": best_epoch})
+    wandb.log({"best_val_dice": best_val_dice, "best_epoch": best_epoch,
+               "stopped_early": stopped_early, "early_stop_patience": patience})
     wandb.finish()
 
     return {
-        "group": group_name, "seed": seed,
-        "best_val_dice": best_val_dice, "best_epoch": best_epoch,
+        "group":          group_name,
+        "seed":           seed,
+        "train_fraction": train_fraction,
+        "n_train":        n_train,
+        "best_val_dice":  best_val_dice,
+        "best_epoch":     best_epoch,
+        "stopped_early":  stopped_early,
         **early_dice
     }
 
 
 def main():
     conditions = [
-        ("A_baseline",        None,              0),
-        ("E4_enc1_init_frozen",      ["enc1"],           0),
-        # ("B_enc2_init",      ["enc2"],           0),
-
-        # ("H_enc1enc2_init",  ["enc1", "enc2"],   0),
+        ("A_baseline", None,     0),
+        ("B_enc1",     ["enc1"], 0),
     ]
 
     all_results = []
 
-    for group_name, inject_blocks, _ in conditions:
-        print(f"\n{'='*50}")
-        print(f"Running group: {group_name}")
-        for seed in SEEDS:
-            print(f"  Seed: {seed}")
-            train_loader, val_loader, test_loader = make_loaders(seed, BATCH_SIZE)
-            result = train_one_run(group_name, seed, inject_blocks,
-                                   train_loader, val_loader, test_loader)
-            all_results.append(result)
+    for fraction in FRACTIONS:
+        print(f"\n{'='*60}")
+        print(f"Train fraction: {fraction} ({int(fraction*100)}%)")
+        for group_name, inject_block, freeze_epochs in conditions:
+            print(f"\n  Condition: {group_name}")
+            for seed in SEEDS:
+                print(f"    Seed: {seed}")
+                train_loader, val_loader, test_loader = make_loaders(
+                    seed, BATCH_SIZE, train_fraction=fraction
+                )
+                n_train = len(train_loader.dataset)
+                print(f"    n_train={n_train} | n_val={len(val_loader.dataset)}")
+                result = train_one_run(
+                    group_name, seed, inject_block,
+                    train_loader, val_loader, test_loader,
+                    freeze_epochs=freeze_epochs,
+                    train_fraction=fraction,
+                )
+                all_results.append(result)
 
     import pandas as pd
     df = pd.DataFrame(all_results)
-    summary = df.groupby("group").agg(["mean", "std"]).round(4)
-    print("\n=== Run2 Summary ===")
+    df.to_csv("datasize_results.csv", index=False)
+
+    summary = (
+        df.groupby(["group", "train_fraction"])["best_val_dice"]
+          .agg(["mean", "std"])
+          .round(4)
+    )
+    print("\n=== Data Size Ablation Summary ===")
     print(summary)
-    summary.to_csv("tompei_run2_results.csv")
 
 
 if __name__ == "__main__":

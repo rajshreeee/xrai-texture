@@ -1,0 +1,6 @@
+Train Fraction,Baseline Test Dice,Enc1 Test Dice,Baseline Test IoU,Enc1 Test IoU,Baseline Best Epoch,Enc1 Best Epoch
+10%,0.6890,0.7042,0.5501,0.5626,24,23
+25%,0.7454,0.7507,0.6163,0.6178,29,26
+50%,0.7883,0.7966,0.6656,0.6735,38,28
+75%,0.8096,0.8145,0.6923,0.6985,42,36
+100%,0.8163,0.8205,0.7013,0.7074,38,49

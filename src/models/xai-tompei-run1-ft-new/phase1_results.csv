@@ -1,0 +1,5 @@
+,seed,seed,best_val_dice,best_val_dice,best_epoch,best_epoch,dice_val_epoch5,dice_val_epoch5,dice_val_epoch10,dice_val_epoch10,dice_val_epoch15,dice_val_epoch15,dice_val_epoch20,dice_val_epoch20
+,mean,std,mean,std,mean,std,mean,std,mean,std,mean,std,mean,std
+group,,,,,,,,,,,,,,
+A_baseline_without_aug,42.0,,0.817,,19.0,,0.6721,,0.771,,0.8045,,0.8097,
+D_layer1,42.0,,0.832,,19.0,,0.6936,,0.7908,,0.8208,,0.8233,
