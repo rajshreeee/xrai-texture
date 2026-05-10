@@ -1,0 +1,6 @@
+Train Fraction,Baseline Test Dice,Layer1 Test Dice,Baseline Test IoU,Layer1 Test IoU,Target Dice (min best),Baseline Epoch @ Target,Layer1 Epoch @ Target
+10%,0.5133,0.5111,0.3659,0.3649,0.5111,62,62
+25%,0.6300,0.6439,0.4811,0.4947,0.6300,61,50
+50%,0.6637,0.6811,0.5177,0.5373,0.6637,41,37
+75%,0.6777,0.6811,0.5354,0.5388,0.6777,43,37
+100%,0.7450,0.7396,0.6140,0.6079,0.7396,56,57
