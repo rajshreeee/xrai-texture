@@ -21,13 +21,12 @@ import config
 import random
 
 SEEDS = [42]
-# FRACTIONS = [0.10, 0.25, 0.50, 0.75, 1.0]
-FRACTIONS = [0.5, 1.0]
+FRACTIONS = [0.10, 0.25, 0.50, 0.75, 1.0]
 
-MAX_EPOCHS          = 80
+MAX_EPOCHS          = 100
 EARLY_STOP_PATIENCE = 10
 MIN_DELTA           = 0.001  # minimum val_dice improvement to count as progress
-T_MAX               = 80    # CosineAnnealingLR period
+T_MAX               = 100    # CosineAnnealingLR period
 BATCH_SIZE = 8
 LR = 1e-5
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -35,60 +34,79 @@ CHECKPOINT_DIR = Path(config.CHECKPOINT_DIR)
 CHECKPOINT_DIR.mkdir(exist_ok=True)
 KERNEL_JITTER_SEED = 42
 
-all_layer_kernels = {
-    "layer3": [
-        np.array([[-10, -6, -3, -2, -3],
-                  [ -5,  0,  2,  3,  2],
-                  [ -2,  2,  5,  6,  4],
-                  [ -2,  2,  4,  5,  3],
-                  [ -5,  0,  0,  0,  0]], dtype=np.float32),
-        np.array([[ -8, -4,  0, -2, -5],
-                  [ -4,  0,  4,  4,  0],
-                  [ -3,  3,  6,  6,  4],
-                  [ -5,  0,  5,  6,  4],
-                  [-10, -4,  0,  2,  0]], dtype=np.float32),
-    ],
-    "layer4": [
-        np.array([[-10, -6, -3, -2, -2],
-                  [ -6, -2,  0,  2,  0],
-                  [ -3,  0,  3,  4,  3],
-                  [ -2,  2,  4,  5,  4],
-                  [ -2,  0,  3,  4,  2]], dtype=np.float32),
-    ],
-    "classifier": [
-        np.array([[ -9, -4, -3, -5, -10],
-                  [ -4,  0,  4,  3,  -2],
-                  [ -3,  4,  7,  7,   2],
-                  [ -4,  3,  7,  7,   4],
-                  [ -9, -2,  3,  4,   0]], dtype=np.float32),
-        np.array([[-10, -5, -2, -2, -3],
-                  [ -5,  0,  2,  2,  0],
-                  [ -2,  2,  4,  4,  2],
-                  [  0,  3,  4,  4,  2],
-                  [ -3,  0,  2,  2,  0]], dtype=np.float32),
-    ],
-}
+KR_KERNELS = [
+    np.array([
+        [-0.00371635, -0.00391476, -0.00411817],
+        [ 0.00164007,  0.00428494,  0.00119254],
+        [ 0.00182289,  0.00264156,  0.00016729]
+    ], dtype=np.float32),
+
+    np.array([
+        [ 0.00219253, -0.00211677,  0.00200776],
+        [ 0.00228668, -0.00964566,  0.00172222],
+        [ 0.00288709, -0.00198506,  0.00265121]
+    ], dtype=np.float32),
+
+    np.array([
+        [-0.00187108,  0.00003464, -0.00066214],
+        [-0.00096704,  0.00141499,  0.00207667],
+        [-0.00146049,  0.00157941, -0.00014496]
+    ], dtype=np.float32),
+
+    np.array([
+        [-0.00062489, -0.00180864, -0.00152716],
+        [ 0.00129044,  0.00058043,  0.00068297],
+        [ 0.00081856,  0.00033800,  0.00025030]
+    ], dtype=np.float32),
+
+    np.array([
+        [ 0.00162122,  0.00090959,  0.00158802],
+        [-0.00059961, -0.00285438, -0.00051475],
+        [-0.00054948, -0.00002701,  0.00042640]
+    ], dtype=np.float32),
+
+    np.array([
+        [-0.00578342, -0.00562701, -0.00593188],
+        [ 0.00246649,  0.00240962,  0.00278980],
+        [ 0.00337877,  0.00304987,  0.00324776]
+    ], dtype=np.float32),
+
+    np.array([
+        [-0.00090438, -0.00020711, -0.00083958],
+        [ 0.00000049,  0.00150385,  0.00004852],
+        [-0.00053568,  0.00057249,  0.00036139]
+    ], dtype=np.float32),
+
+    np.array([
+        [-0.00204773,  0.00169760, -0.00277730],
+        [ 0.00344980,  0.00299332,  0.00312406],
+        [-0.00378768,  0.00136014, -0.00401221]
+    ], dtype=np.float32),
+
+    np.array([
+        [-0.00137177, -0.00054889, -0.00192962],
+        [ 0.00069109,  0.00783324, -0.00041324],
+        [-0.00151642, -0.00076535, -0.00197903]
+    ], dtype=np.float32),
+
+    np.array([
+        [ 0.00230449, -0.00126131,  0.00217926],
+        [ 0.00055780, -0.00718292,  0.00022351],
+        [ 0.00191462, -0.00085925,  0.00212381]
+    ], dtype=np.float32),
+]
 
 
-def resize_kernels_bilinear(kernel_dict, target_size=(3, 3)):
-    resized = {}
-    for layer_name, kernels in kernel_dict.items():
-        out = []
-        for k in kernels:
-            k_t = torch.from_numpy(k).float().unsqueeze(0).unsqueeze(0)
-            k_r = nnF.interpolate(k_t, size=target_size, mode='bilinear', align_corners=False)
-            k_f = k_r.squeeze().numpy()
-            k_f = k_f - np.mean(k_f)
-            s = np.std(k_f)
-            if s > 1e-8:
-                k_f = k_f / s
-            out.append(k_f.astype(np.float32))
-        resized[layer_name] = out
-    return resized
+def preprocess_kernels_kr(kernels):
+    """Mean-center only — kernels are already 3×3, no resize or unit-variance normalization."""
+    out = []
+    for k in kernels:
+        k_f = k - np.mean(k)
+        out.append(k_f.astype(np.float32))
+    return out
 
 
-_RESIZED = resize_kernels_bilinear(all_layer_kernels)
-KERNELS = [k for group in _RESIZED.values() for k in group]  # flat list, 5 kernels
+KERNELS = preprocess_kernels_kr(KR_KERNELS)  # 10 kernels
 
 
 def set_all_seeds(seed):
@@ -172,18 +190,10 @@ def tversky_loss(pred, target, alpha=0.3, beta=0.7, eps=1e-6):
     tversky = (tp + eps) / (tp + alpha * fn + beta * fp + eps)
     return (1 - tversky).mean()
 
-# def combined_loss(pred, target, bce_weight=0.3):
-#     bce = nn.BCEWithLogitsLoss()(pred, target)
-#     tv  = tversky_loss(pred, target, alpha=0.3, beta=0.7)
-#     return bce_weight * bce + (1 - bce_weight) * tv
-
-def combined_loss(pred, target, bce_weight=0.5):
+def combined_loss(pred, target, bce_weight=0.3):
     bce = nn.BCEWithLogitsLoss()(pred, target)
-    pred_sig = torch.sigmoid(pred)
-    intersection = (pred_sig * target).sum(dim=(2,3))
-    dice = 1 - ((2*intersection + 1) / (pred_sig.sum(dim=(2,3)) + target.sum(dim=(2,3)) + 1)).mean()
-    return bce_weight * bce + (1 - bce_weight) * dice
-
+    tv  = tversky_loss(pred, target, alpha=0.3, beta=0.7)
+    return bce_weight * bce + (1 - bce_weight) * tv
 
 def train_one_run(group_name, seed, inject_blocks, train_loader, val_loader, test_loader,
                   freeze_epochs=0, train_fraction=1.0,
@@ -227,7 +237,7 @@ def train_one_run(group_name, seed, inject_blocks, train_loader, val_loader, tes
             "train_fraction": train_fraction,
             "n_train_images": n_train,
             "model":          "ResNet18UNet",
-            "dataset":        "TOMPEI",
+            "dataset":        "CBIS",
         },
         reinit=True
     )
@@ -356,8 +366,8 @@ def train_one_run(group_name, seed, inject_blocks, train_loader, val_loader, tes
 
 def main():
     conditions = [
-        ("A2_baseline", None,        0),
-        ("B2_layer1",   ["layer1"],  0),  # first ResNet18 encoder block, equivalent to enc1
+        # ("A_baseline", None, 0),
+        ("KR_B_layer1", ["layer1"], 0),  # KR kernels injected into ResNet18 encoder layer1
     ]
 
     all_results = []

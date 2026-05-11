@@ -1,0 +1,3 @@
+fraction_pct,condition,inject_block,layer1_0_conv1_frob,layer1_0_conv1_cosine,layer1_0_conv2_frob,layer1_0_conv2_cosine,layer2_0_conv1_frob,layer2_0_conv1_cosine
+50,Baseline,none,0.010486,0.999929,0.012418,0.999906,0.012887,0.999905
+100,Baseline,none,0.013323,0.999896,0.015102,0.999866,0.016897,0.999844

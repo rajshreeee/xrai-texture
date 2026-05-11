@@ -6,14 +6,14 @@ import pandas as pd
 # CONFIG
 # ============================================================
 
-LOG_DIR = Path("/ediss_data/ediss2/xai-texture/src/models/kr-xai-stdunet-tompei-datasize/logs")
+LOG_DIR = Path("/ediss_data/ediss2/xai-texture/src/models/kr-xai-resnet18unet-cbis-datasize/logs")
 FRACTIONS = [10, 25, 50, 75, 100]
 
 # ============================================================
 # REGEX
 # ============================================================
 
-filename_pattern = re.compile(r"(A_baseline|B_enc1)_frac(\d+)_seed\d+")
+filename_pattern = re.compile(r"(A_baseline|KR_B_layer1)_frac(\d+)_seed\d+")
 
 epoch_line_pattern = re.compile(
     r"Epoch\s+(\d+)/(\d+).*?"
@@ -73,7 +73,7 @@ for log_file in LOG_DIR.glob("*.log"):
             break
 
     # -------------------------------
-    # STORE ALL EPOCH CURVES (NEW)
+    # STORE ALL EPOCH CURVES
     # -------------------------------
     curve = []
 
@@ -97,7 +97,7 @@ for log_file in LOG_DIR.glob("*.log"):
     }
 
 # ============================================================
-# TIME-TO-THRESHOLD (YOUR NEW METRIC)
+# TIME-TO-THRESHOLD
 # ============================================================
 
 def first_epoch_to_reach(curve, target):
@@ -114,32 +114,31 @@ rows = []
 
 for fraction in FRACTIONS:
 
-    base = results.get(fraction, {}).get("A_baseline", {})
-    enc  = results.get(fraction, {}).get("B_enc1", {})
+    base   = results.get(fraction, {}).get("A_baseline", {})
+    layer1 = results.get(fraction, {}).get("KR_B_layer1", {})
 
-    base_best = base.get("dice")
-    enc_best = enc.get("dice")
+    base_best   = base.get("dice")
+    layer1_best = layer1.get("dice")
 
     # ---- fairness threshold ----
-    if base_best is None or enc_best is None:
+    if base_best is None or layer1_best is None:
         continue
 
-    target = min(base_best, enc_best)
+    target = min(base_best, layer1_best)
 
-    base_epoch_to_target = first_epoch_to_reach(base.get("curve", []), target)
-    enc_epoch_to_target  = first_epoch_to_reach(enc.get("curve", []), target)
+    base_epoch_to_target   = first_epoch_to_reach(base.get("curve", []), target)
+    layer1_epoch_to_target = first_epoch_to_reach(layer1.get("curve", []), target)
 
     rows.append({
         "Train Fraction": f"{fraction}%",
         "Baseline Test Dice": base_best,
-        "Enc1 Test Dice": enc_best,
+        "KR_Layer1 Test Dice": layer1_best,
         "Baseline Test IoU": base.get("iou"),
-        "Enc1 Test IoU": enc.get("iou"),
+        "KR_Layer1 Test IoU": layer1.get("iou"),
 
-        # NEW FAIR COLUMN
         "Target Dice (min best)": target,
         "Baseline Epoch @ Target": base_epoch_to_target,
-        "Enc1 Epoch @ Target": enc_epoch_to_target,
+        "KR_Layer1 Epoch @ Target": layer1_epoch_to_target,
     })
 
 df = pd.DataFrame(rows)
@@ -150,9 +149,9 @@ df = pd.DataFrame(rows)
 
 metric_cols = [
     "Baseline Test Dice",
-    "Enc1 Test Dice",
+    "KR_Layer1 Test Dice",
     "Baseline Test IoU",
-    "Enc1 Test IoU",
+    "KR_Layer1 Test IoU",
     "Target Dice (min best)"
 ]
 

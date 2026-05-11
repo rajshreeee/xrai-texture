@@ -1,0 +1,2 @@
+Train Fraction,Baseline Test Dice,KR_Layer1 Test Dice,Baseline Test IoU,KR_Layer1 Test IoU,Target Dice (min best),Baseline Epoch @ Target,KR_Layer1 Epoch @ Target
+10%,0.5133,0.4959,0.3659,0.3501,0.4959,55,43

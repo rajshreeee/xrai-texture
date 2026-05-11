@@ -6,7 +6,7 @@ import pandas as pd
 # CONFIG
 # ============================================================
 
-LOG_DIR = Path("/ediss_data/ediss2/xai-texture/src/models/kr-xai-stdunet-tompei-datasize/logs")
+LOG_DIR = Path("/ediss_data/ediss2/xai-texture/src/models/kr-xai-stdunet-cbis-datasize/logs")
 FRACTIONS = [10, 25, 50, 75, 100]
 
 # ============================================================

@@ -1,0 +1,5 @@
+PROJECT_NAME   = "tompei-resnet18unet-kr"
+LOG_DIR        = "/ediss_data/ediss2/xai-texture/src/models/kr-xai-resnet18unet-tompei-datasize/logs"
+CHECKPOINT_DIR = "/ediss_data/ediss2/xai-texture/src/models/kr-xai-resnet18unet-tompei-datasize/checkpoints"
+SPLIT_PATH     = "/ediss_data/ediss2/xai-texture/src/models/kr-xai-resnet18unet-tompei-datasize/data/split_indices.json"
+DATA_ROOT      = "/ediss_data/ediss2/xai-texture/data/TOMPEI"
