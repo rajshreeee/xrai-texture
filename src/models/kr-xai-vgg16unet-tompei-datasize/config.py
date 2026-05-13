@@ -1,0 +1,5 @@
+PROJECT_NAME   = "kr-tompei-vgg16unet"
+LOG_DIR        = "/ediss_data/ediss2/xai-texture/src/models/kr-xai-vgg16unet-tompei-datasize/logs"
+CHECKPOINT_DIR = "/ediss_data/ediss2/xai-texture/src/models/kr-xai-vgg16unet-tompei-datasize/checkpoints"
+SPLIT_PATH     = "/ediss_data/ediss2/xai-texture/src/models/xai-stdunet-tompei-datasize/data/split_indices.json"
+DATA_ROOT      = "/ediss_data/ediss2/xai-texture/data/TOMPEI"

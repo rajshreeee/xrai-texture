@@ -1,0 +1,5 @@
+PROJECT_NAME   = "cbis-vgg16unet"
+LOG_DIR        = "/ediss_data/ediss2/xai-texture/src/models/xai-vgg16unet-cbis-datasize/logs"
+CHECKPOINT_DIR = "/ediss_data/ediss2/xai-texture/src/models/xai-vgg16unet-cbis-datasize/checkpoints"
+SPLIT_PATH     = "/ediss_data/ediss2/xai-texture/src/models/xai-stdunet-cbis-datasize/data/split_indices.json"
+DATA_ROOT      = "/ediss_data/ediss2/xai-texture/data/CBIS_DDSM_Patches_Mass_Context"

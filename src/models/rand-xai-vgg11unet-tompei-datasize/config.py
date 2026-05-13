@@ -1,0 +1,5 @@
+PROJECT_NAME   = "tompei-vgg11unet-datasize-rand"
+LOG_DIR        = "/ediss_data/ediss2/xai-texture/src/models/rand-xai-vgg11unet-tompei-datasize/logs"
+CHECKPOINT_DIR = "/ediss_data/ediss2/xai-texture/src/models/rand-xai-vgg11unet-tompei-datasize/checkpoints"
+SPLIT_PATH     = "/ediss_data/ediss2/xai-texture/src/models/xai-stdunet-tompei-datasize/data/split_indices.json"
+DATA_ROOT      = "/ediss_data/ediss2/xai-texture/data/TOMPEI"
